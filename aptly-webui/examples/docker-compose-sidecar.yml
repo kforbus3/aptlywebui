@@ -1,0 +1,40 @@
+# Alternative: run the aptly API as a separate "sidecar" container
+# that shares the same volume as your main aptly container.
+# This way you don't have to change your main aptly image at all.
+
+version: "3.8"
+
+services:
+  # Your EXISTING aptly container (unchanged)
+  aptly:
+    image: your-existing-aptly-image:latest
+    volumes:
+      - aptly-data:/var/lib/aptly
+    ports:
+      - "80:80"   # package web server
+    # whatever command you already use
+    command: aptly serve -listen=:80
+
+  # NEW: API sidecar — same image, same data volume, different command
+  aptly-api:
+    image: your-existing-aptly-image:latest
+    volumes:
+      - aptly-data:/var/lib/aptly
+    ports:
+      - "8080:8080"
+    command: aptly api serve -listen=:8080 -no-lock
+
+  # The WebUI we built earlier
+  aptly-webui:
+    build: ../
+    ports:
+      - "5000:5000"
+    environment:
+      - APTLY_API_URL=http://aptly-api:8080/api
+    depends_on:
+      - aptly-api
+
+volumes:
+  aptly-data:
+    # If your existing aptly container already uses a named volume,
+    # reference it by name here instead of creating a new one.
