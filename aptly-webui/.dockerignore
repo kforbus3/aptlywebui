@@ -1,0 +1,47 @@
+# Node
+frontend/node_modules
+frontend/dist
+frontend/.env.local
+frontend/.env.*.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# Python
+backend/__pycache__
+backend/*.pyc
+backend/*.pyo
+backend/*.pyd
+backend/.Python
+backend/venv/
+backend/env/
+backend/.env
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Tests
+frontend/coverage
+backend/tests
+.pytest_cache
+
+# Build artifacts
+dist
+build
+*.egg-info
+
+# OS
+.DS_Store
+Thumbs.db

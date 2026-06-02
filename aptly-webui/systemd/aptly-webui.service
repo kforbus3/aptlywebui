@@ -1,0 +1,39 @@
+[Unit]
+Description=Aptly Web UI
+After=network.target
+
+[Service]
+Type=simple
+User=aptly
+Group=aptly
+WorkingDirectory=/opt/aptly-webui
+
+Environment=FLASK_DEBUG=false
+Environment=PORT=5000
+Environment=APTLY_CLI=aptly
+EnvironmentFile=-/etc/aptly-webui/environment
+
+# Start gunicorn
+ExecStart=/opt/aptly-webui/venv/bin/gunicorn \
+    --bind 0.0.0.0:5000 \
+    --workers 4 \
+    --timeout 300 \
+    --access-logfile /var/log/aptly-webui/access.log \
+    --error-logfile /var/log/aptly-webui/error.log \
+    --capture-output \
+    --enable-stdio-inheritance \
+    wsgi:application
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aptly /var/log/aptly-webui
+
+[Install]
+WantedBy=multi-user.target

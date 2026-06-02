@@ -1,0 +1,18 @@
+# Example: extending an existing aptly image to also run the API
+# Adapt FROM to match your current image (e.g. ubuntu/aptly, or your own)
+
+FROM ubuntu:22.04
+
+# Install aptly and supervisor
+RUN apt-get update && apt-get install -y aptly supervisor curl && rm -rf /var/lib/apt/lists/*
+
+# Copy your existing aptly config if you have one, or rely on defaults
+# COPY aptly.conf /etc/aptly.conf
+
+# Supervisor config to run both web server and API
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Expose both ports
+EXPOSE 80 8080
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
