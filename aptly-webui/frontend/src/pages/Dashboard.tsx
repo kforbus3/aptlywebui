@@ -8,7 +8,7 @@ import {
   CheckCircle,
   AlertCircle
 } from 'lucide-react'
-import { getMirrors, getSnapshots, getPublished, healthCheck } from '../services/api'
+import { getMirrors, getSnapshots, getPublished, healthCheck, getStats } from '../services/api'
 import { useNavigate } from 'react-router-dom'
 
 function Dashboard() {
@@ -33,6 +33,11 @@ function Dashboard() {
     queryKey: ['health'],
     queryFn: healthCheck,
     refetchInterval: 30000
+  })
+
+  const { data: statsData, isLoading: statsLoading } = useQuery({
+    queryKey: ['stats'],
+    queryFn: getStats
   })
 
   const stats = [
@@ -62,18 +67,11 @@ function Dashboard() {
     },
     {
       title: 'Total Packages',
-      value: (() => {
-        if (!mirrors) return '...';
-        // Check if any mirrors have package counts available
-        const hasCounts = mirrors.some(m => m.num_packages !== null && m.num_packages !== undefined);
-        if (!hasCounts) return 'N/A*';
-        const total = mirrors.reduce((acc, m) => acc + (m.num_packages || 0), 0);
-        return total.toLocaleString();
-      })(),
+      value: statsData?.stats?.total_packages?.toLocaleString() || '...',
       icon: Package,
       color: 'purple',
       path: '/search',
-      loading: mirrorsLoading
+      loading: statsLoading
     }
   ]
 
@@ -119,13 +117,6 @@ function Dashboard() {
           </div>
         ))}
       </div>
-
-      {/* Note about package count */}
-      {mirrors && mirrors.length > 0 && !mirrors.some(m => m.num_packages !== null && m.num_packages !== undefined) && (
-        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginTop: 'var(--space-sm)', fontStyle: 'italic' }}>
-          * Package count requires individual mirror queries. View a specific mirror for package details.
-        </p>
-      )}
 
       {/* Recent Activity */}
       <div className="card" style={{ marginTop: 'var(--space-xl)' }}>
