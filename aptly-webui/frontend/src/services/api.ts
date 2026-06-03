@@ -265,7 +265,31 @@ export const searchPackages = async (
   if (options?.in_snapshots !== false) params.append('snapshots', 'true')
 
   const response = await api.get(`/packages/search?${params.toString()}`)
-  return response.data
+  const data = response.data
+
+  // Transform backend format to frontend expected format
+  // Backend returns: package_name, source_name, source_type
+  // Frontend expects: package, name (for snapshots), type, location
+  if (data.results) {
+    data.results = data.results.map((r: any) => {
+      // If already in correct format, return as-is
+      if (r.package && r.type) return r
+
+      // Transform from backend format
+      return {
+        package: r.package_name || r.package,
+        version: r.version,
+        architecture: r.architecture,
+        type: r.source_type || r.type || 'snapshot',
+        name: r.source_name || r.name,
+        prefix: r.prefix || '',
+        distribution: r.distribution,
+        location: r.source_name || r.location
+      }
+    })
+  }
+
+  return data
 }
 
 export const showPackage = async (packageKey: string): Promise<unknown> => {
