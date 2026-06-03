@@ -252,11 +252,19 @@ def get_snapshot(name):
         if not snapshot or not snapshot.get('sources'):
             logger.info(f"Fetching snapshot {name} from API (lazy load)")
             detail = aptly_api_get(f'snapshots/{name}')
+
+            # Get package count from /packages endpoint
+            try:
+                packages = aptly_api_get(f'snapshots/{name}/packages')
+                num_packages = len(packages)
+            except:
+                num_packages = 0
+
             snapshot = {
                 'name': name,
                 'created_at': detail.get('CreatedAt', ''),
                 'description': detail.get('Description', ''),
-                'num_packages': len(detail.get('Packages', [])),
+                'num_packages': num_packages,
                 'sources': detail.get('Sources', [])
             }
             # Update cache
