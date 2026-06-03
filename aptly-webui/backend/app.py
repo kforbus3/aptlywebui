@@ -227,6 +227,79 @@ def trigger_sync():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/cache/index-packages', methods=['POST'])
+def index_packages():
+    """Index packages for search"""
+    try:
+        max_snapshots = request.json.get('max_snapshots', 50) if request.json else 50
+        if sync_service and hasattr(sync_service, 'index_packages_limited'):
+            result = sync_service.index_packages_limited(max_snapshots)
+            return jsonify({'success': True, 'result': result})
+        else:
+            return jsonify({'success': False, 'error': 'Sync service not available'}), 400
+    except Exception as e:
+        logger.error(f"Package indexing failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/snapshots/<name>', methods=['GET'])
+def get_snapshot(name):
+    """Get single snapshot details (with lazy loading)"""
+    try:
+        # Try cache first
+        snapshot = cache.get_snapshot(name)
+
+        # If not in cache or no details, fetch from API
+        if not snapshot or not snapshot.get('sources'):
+            logger.info(f"Fetching snapshot {name} from API (lazy load)")
+            detail = aptly_api_get(f'snapshots/{name}')
+            snapshot = {
+                'name': name,
+                'created_at': detail.get('CreatedAt', ''),
+                'description': detail.get('Description', ''),
+                'num_packages': len(detail.get('Packages', [])),
+                'sources': detail.get('Sources', [])
+            }
+            # Update cache
+            cache.save_snapshots([snapshot])
+
+        return jsonify({'snapshot': snapshot})
+    except Exception as e:
+        logger.error(f"Failed to get snapshot {name}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/mirrors/<name>', methods=['GET'])
+def get_mirror(name):
+    """Get single mirror details"""
+    try:
+        mirror = cache.get_mirror(name)
+        if not mirror:
+            detail = aptly_api_get(f'mirrors/{name}')
+            mirror = {
+                'name': name,
+                'archive_root': detail.get('ArchiveRoot', ''),
+                'distribution': detail.get('Distribution', ''),
+                'components': detail.get('Components', []),
+                'architectures': detail.get('Architectures', []),
+                'last_updated': detail.get('LastDownloadDate', ''),
+                'num_packages': detail.get('PackageCount', 0),
+                'download_size': str(detail.get('DownloadSize', '0'))
+            }
+        return jsonify({'mirror': mirror})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/packages/count', methods=['GET'])
+def get_package_count():
+    """Get total package count across all snapshots"""
+    try:
+        stats = cache.get_stats()
+        return jsonify({
+            'total_packages': stats.get('total_packages', 0),
+            'note': 'Package count from indexed snapshots only'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # =============================================================================
 # Main Entry Point
 # =============================================================================
