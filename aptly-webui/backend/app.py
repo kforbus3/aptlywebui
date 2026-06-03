@@ -212,7 +212,25 @@ def _search_packages_direct(query: str, limit: int = 100) -> list:
         """, (pattern, limit))
 
         rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+
+        # Transform results to match frontend expectations
+        results = []
+        for row in rows:
+            result = dict(row)
+            # Map database fields to frontend expected format
+            transformed = {
+                'package': result.get('package_name', ''),
+                'version': result.get('version', ''),
+                'architecture': result.get('architecture', ''),
+                'type': result.get('source_type', 'snapshot'),
+                'name': result.get('source_name', '') if result.get('source_type') == 'snapshot' else None,
+                'prefix': '',
+                'distribution': result.get('source_name', '') if result.get('source_type') == 'published' else None,
+                'location': result.get('source_name', '')
+            }
+            results.append(transformed)
+
+        return results
     except Exception as e:
         logger.error(f"Direct search error: {e}")
         return []
