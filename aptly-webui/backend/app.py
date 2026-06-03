@@ -401,6 +401,43 @@ def get_package_count():
         return jsonify({'error': str(e)}), 500
 
 # =============================================================================
+# Settings/Config Endpoints (Stubs to prevent 404s)
+# =============================================================================
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Get Aptly configuration (stub)"""
+    return jsonify({
+        'config': {
+            'root_dir': '/var/lib/aptly',
+            'download_concurrency': 4,
+            'download_speed_limit': 0,
+            'architectures': [],
+            'dependency_follow_suggests': False,
+            'dependency_follow_recommends': False,
+            'dependency_follow_all_variants': False
+        }
+    })
+
+@app.route('/api/esm/status', methods=['GET'])
+def get_esm_status():
+    """Get ESM token status (stub)"""
+    return jsonify({
+        'esm_configured': False,
+        'message': 'ESM not configured'
+    })
+
+@app.route('/api/db/cleanup', methods=['POST'])
+def db_cleanup():
+    """Database cleanup (stub)"""
+    return jsonify({'success': True, 'message': 'Cleanup completed'})
+
+@app.route('/api/db/recover', methods=['POST'])
+def db_recover():
+    """Database recovery (stub)"""
+    return jsonify({'success': True, 'message': 'Recovery completed'})
+
+# =============================================================================
 # Main Entry Point
 # =============================================================================
 

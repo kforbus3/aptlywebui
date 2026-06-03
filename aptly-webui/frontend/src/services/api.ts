@@ -143,7 +143,17 @@ export interface PublishSnapshotRequest {
 
 export const getMirrors = async (): Promise<Mirror[]> => {
   const response = await api.get('/mirrors')
-  return response.data.mirrors
+  const mirrors = response.data.mirrors || []
+
+  // Transform backend format to frontend format
+  return mirrors.map((m: any) => ({
+    ...m,
+    // Map package_count to num_packages if needed
+    num_packages: m.num_packages !== undefined ? m.num_packages : (m.package_count || 0),
+    // Parse JSON fields if they're strings
+    components: typeof m.components === 'string' ? JSON.parse(m.components || '[]') : (m.components || []),
+    architectures: typeof m.architectures === 'string' ? JSON.parse(m.architectures || '[]') : (m.architectures || [])
+  }))
 }
 
 export const getMirror = async (name: string): Promise<Mirror> => {
@@ -185,7 +195,16 @@ export const getMirrorPackages = async (
 
 export const getSnapshots = async (): Promise<Snapshot[]> => {
   const response = await api.get('/snapshots')
-  return response.data.snapshots
+  const snapshots = response.data.snapshots || []
+
+  // Transform backend format to frontend format
+  return snapshots.map((s: any) => ({
+    ...s,
+    // Map package_count to num_packages if needed
+    num_packages: s.num_packages !== undefined ? s.num_packages : (s.package_count || 0),
+    // Parse sources if it's a string
+    sources: typeof s.sources === 'string' ? JSON.parse(s.sources || '[]') : (s.sources || [])
+  }))
 }
 
 export const getSnapshot = async (name: string): Promise<Snapshot> => {
