@@ -5,12 +5,14 @@ Wants=aptly-webui-backend.service
 
 [Service]
 Type=simple
-User=aptly
 WorkingDirectory=/home/keith/aptlywebui/aptly-webui/frontend
 Environment=VITE_API_URL=http://10.0.2.160:5001/api
 Environment=NODE_ENV=production
+Environment=PATH=/usr/bin:/usr/local/bin
 
-ExecStart=/usr/bin/npx serve -s dist -l 3000
+# Build first if dist doesn't exist, then serve
+ExecStartPre=-/bin/bash -c "if [ ! -d /home/keith/aptlywebui/aptly-webui/frontend/dist ]; then cd /home/keith/aptlywebui/aptly-webui/frontend && npm run build; fi"
+ExecStart=/usr/bin/python3 -m http.server 3000 --directory /home/keith/aptlywebui/aptly-webui/frontend/dist
 Restart=always
 RestartSec=10
 StandardOutput=journal
