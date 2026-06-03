@@ -183,6 +183,66 @@ def list_published():
         logger.error(f"Failed to list published: {e}")
         return jsonify({'published': [], 'error': str(e)})
 
+# Direct database functions to bypass cached module
+def _get_db_connection():
+    """Get direct database connection"""
+    import sqlite3
+    conn = sqlite3.connect(CACHE_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _search_packages_direct(query: str, limit: int = 100) -> list:
+    """Search packages directly from database"""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if packages table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='packages'")
+        if not cursor.fetchone():
+            return []
+
+        # Use LIKE search
+        pattern = f'%{query}%'
+        cursor.execute("""
+            SELECT package_name, version, architecture, source_name, source_type, 0 as rank
+            FROM packages
+            WHERE package_name LIKE ?
+            LIMIT ?
+        """, (pattern, limit))
+
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Direct search error: {e}")
+        return []
+    finally:
+        conn.close()
+
+def _get_stats_direct() -> dict:
+    """Get stats directly from database"""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+
+        stats = {'total_mirrors': 0, 'total_snapshots': 0, 'total_published': 0, 'total_packages': 0}
+
+        # Check if tables exist and get counts
+        for table in ['mirrors', 'snapshots', 'published', 'packages']:
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+            if cursor.fetchone():
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                count = cursor.fetchone()[0]
+                key = f'total_{table}' if table != 'published' else 'total_published'
+                stats[key] = count
+
+        return stats
+    except Exception as e:
+        logger.error(f"Direct stats error: {e}")
+        return {'total_mirrors': 0, 'total_snapshots': 0, 'total_published': 0, 'total_packages': 0}
+    finally:
+        conn.close()
+
 @app.route('/api/packages/search', methods=['GET'])
 def search_packages():
     """Search packages using FTS"""
@@ -191,7 +251,13 @@ def search_packages():
         return jsonify({'results': [], 'total': 0})
 
     try:
-        results = cache.search_packages(query, limit=100)
+        # Try direct search first
+        results = _search_packages_direct(query, limit=100)
+
+        # Fall back to cache if direct fails
+        if not results:
+            results = cache.search_packages(query, limit=100)
+
         return jsonify({
             'query': query,
             'total': len(results),
@@ -212,7 +278,15 @@ def health_check():
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     try:
-        stats = cache.get_stats()
+        # Try direct database query first
+        stats = _get_stats_direct()
+
+        # If direct returns 0s, try cache
+        if stats['total_snapshots'] == 0:
+            cache_stats = cache.get_stats()
+            if cache_stats.get('total_snapshots', 0) > 0:
+                stats = cache_stats
+
         return jsonify({'stats': stats, 'cache_enabled': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -300,7 +374,7 @@ def get_mirror(name):
 def get_package_count():
     """Get total package count across all snapshots"""
     try:
-        stats = cache.get_stats()
+        stats = _get_stats_direct()
         return jsonify({
             'total_packages': stats.get('total_packages', 0),
             'note': 'Package count from indexed snapshots only'

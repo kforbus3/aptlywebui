@@ -302,6 +302,11 @@ export const healthCheck = async (): Promise<{ status: string; aptly_available: 
   return response.data
 }
 
+export const getStats = async (): Promise<{ stats: { total_mirrors: number; total_snapshots: number; total_published: number; total_packages: number; updated_at: string }; cache_enabled: boolean }> => {
+  const response = await api.get('/stats')
+  return response.data
+}
+
 // ============================================================================
 // API Functions - ESM
 // ============================================================================
