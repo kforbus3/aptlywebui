@@ -47,7 +47,8 @@ function Mirrors() {
     filter: '',
     filter_with_deps: false,
     skip_component_check: false,
-    is_esm: false
+    is_esm: false,
+    esm_token: ''
   })
 
   const { data: mirrors, isLoading } = useQuery({
@@ -103,7 +104,8 @@ function Mirrors() {
       filter: '',
       filter_with_deps: false,
       skip_component_check: false,
-      is_esm: false
+      is_esm: false,
+      esm_token: ''
     })
   }
 
@@ -374,6 +376,24 @@ function Mirrors() {
               <span>Ubuntu ESM Repository (requires ESM token)</span>
             </label>
           </div>
+
+          {formData.is_esm && (
+            <div className="form-group">
+              <label className="label">ESM Token *</label>
+              <input
+                type="password"
+                className="input"
+                value={formData.esm_token}
+                onChange={(e) => setFormData({ ...formData, esm_token: e.target.value })}
+                placeholder="Enter your Ubuntu Pro/ESM token"
+                required={formData.is_esm}
+              />
+              <small style={{ color: 'var(--text-secondary)', display: 'block', marginTop: 'var(--space-xs)' }}>
+                Token is stored encrypted and used for ESM authentication.
+                <a href="https://ubuntu.com/pro" target="_blank" rel="noopener">Get Ubuntu Pro token</a>
+              </small>
+            </div>
+          )}
 
           <div className="modal-footer">
             <button
