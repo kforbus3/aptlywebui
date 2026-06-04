@@ -49,6 +49,7 @@ export interface Mirror {
   filter_with_deps?: boolean
   skip_component_check?: boolean
   is_esm?: boolean
+  esm_token?: string  // Stored ESM token (may be masked)
 }
 
 export interface Snapshot {
@@ -107,6 +108,7 @@ export interface CreateMirrorRequest {
   with_udebs?: boolean
   skip_component_check?: boolean
   is_esm?: boolean
+  esm_token?: string  // Token for ESM authentication
 }
 
 export interface CreateSnapshotRequest {
