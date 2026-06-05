@@ -40,17 +40,6 @@ class AptlyCache:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # Migration: Check if we have old contentless FTS table and migrate
-        try:
-            cursor.execute("SELECT sql FROM sqlite_master WHERE name='packages_fts'")
-            row = cursor.fetchone()
-            if row and "content=''" in row[0]:
-                logger.info("Migrating from contentless FTS to external content FTS")
-                cursor.execute("DROP TABLE IF EXISTS packages_fts")
-                cursor.execute("DROP TABLE IF EXISTS packages")
-        except Exception as e:
-            logger.debug(f"Migration check error: {e}")
-
         # Mirrors table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS mirrors (
@@ -99,20 +88,7 @@ class AptlyCache:
             )
         """)
 
-        # Packages table for storing actual data
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS packages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                package_name TEXT,
-                version TEXT,
-                architecture TEXT,
-                source_name TEXT,
-                source_type TEXT,
-                UNIQUE(package_name, version, architecture, source_name, source_type)
-            )
-        """)
-
-        # FTS5 virtual table for package search (external content table)
+        # FTS5 virtual table for package search
         cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(
                 package_name,
@@ -120,24 +96,9 @@ class AptlyCache:
                 architecture,
                 source_name,
                 source_type,
-                content='packages',
-                content_rowid='id'
+                content='',
+                content_rowid='rowid'
             )
-        """)
-
-        # Trigger to keep FTS index in sync
-        cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS packages_ai AFTER INSERT ON packages BEGIN
-                INSERT INTO packages_fts(rowid, package_name, version, architecture, source_name, source_type)
-                VALUES (new.id, new.package_name, new.version, new.architecture, new.source_name, new.source_type);
-            END
-        """)
-
-        cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS packages_ad AFTER DELETE ON packages BEGIN
-                INSERT INTO packages_fts(packages_fts, rowid, package_name, version, architecture, source_name, source_type)
-                VALUES ('delete', old.id, old.package_name, old.version, old.architecture, old.source_name, old.source_type);
-            END
         """)
 
         # Sync state tracking
@@ -357,7 +318,7 @@ class AptlyCache:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM snapshots WHERE name = ?", (name,))
-        cursor.execute("DELETE FROM packages WHERE source_name = ? AND source_type = 'snapshot'", (name,))
+        cursor.execute("DELETE FROM packages_fts WHERE source_name = ? AND source_type = 'snapshot'", (name,))
         conn.commit()
         self._update_stats()
 
@@ -458,7 +419,7 @@ class AptlyCache:
 
         # Clear existing packages for this source
         cursor.execute("""
-            DELETE FROM packages
+            DELETE FROM packages_fts
             WHERE source_name = ? AND source_type = ?
         """, (source_name, source_type))
 
@@ -480,7 +441,7 @@ class AptlyCache:
 
                 if len(batch) >= batch_size:
                     cursor.executemany("""
-                        INSERT OR IGNORE INTO packages
+                        INSERT INTO packages_fts
                         (package_name, version, architecture, source_name, source_type)
                         VALUES (?, ?, ?, ?, ?)
                     """, batch)
@@ -488,7 +449,7 @@ class AptlyCache:
 
         if batch:
             cursor.executemany("""
-                INSERT OR IGNORE INTO packages
+                INSERT INTO packages_fts
                 (package_name, version, architecture, source_name, source_type)
                 VALUES (?, ?, ?, ?, ?)
             """, batch)
@@ -499,58 +460,43 @@ class AptlyCache:
 
     def search_packages(self, query: str, source_filter: Optional[str] = None,
                         limit: int = 100) -> List[Dict]:
-        """Search packages using LIKE query (fallback for compatibility)"""
+        """Search packages using FTS"""
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # Use LIKE query for compatibility - FTS requires triggers
-        pattern = f'%{query}%'
+        # Build FTS query
+        fts_query = ' '.join(f'{term}*' for term in query.split() if term)
 
         if source_filter:
             cursor.execute("""
-                SELECT *, 0 as rank FROM packages
-                WHERE package_name LIKE ?
+                SELECT *, rank FROM packages_fts
+                WHERE packages_fts MATCH ?
                 AND source_name = ?
+                ORDER BY rank
                 LIMIT ?
-            """, (pattern, source_filter, limit))
+            """, (fts_query, source_filter, limit))
         else:
             cursor.execute("""
-                SELECT *, 0 as rank FROM packages
-                WHERE package_name LIKE ?
+                SELECT *, rank FROM packages_fts
+                WHERE packages_fts MATCH ?
+                ORDER BY rank
                 LIMIT ?
-            """, (pattern, limit))
+            """, (fts_query, limit))
 
         rows = cursor.fetchall()
-
-        # Transform results to match frontend expectations
-        results = []
-        for row in rows:
-            result = dict(row)
-            transformed = {
-                'package': result.get('package_name', ''),
-                'version': result.get('version', ''),
-                'architecture': result.get('architecture', ''),
-                'type': result.get('source_type', 'snapshot'),
-                'name': result.get('source_name', '') if result.get('source_type') == 'snapshot' else None,
-                'prefix': '',
-                'distribution': result.get('source_name', '') if result.get('source_type') == 'published' else None,
-                'location': result.get('source_name', '')
-            }
-            results.append(transformed)
-
-        return results
+        return [dict(row) for row in rows]
 
     def get_package_stats(self) -> Dict[str, int]:
         """Get package index statistics"""
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(*) as total FROM packages")
+        cursor.execute("SELECT COUNT(*) as total FROM packages_fts")
         total = cursor.fetchone()['total']
 
         cursor.execute("""
             SELECT source_type, COUNT(*) as count
-            FROM packages
+            FROM packages_fts
             GROUP BY source_type
         """)
         by_source = {row['source_type']: row['count'] for row in cursor.fetchall()}
@@ -564,7 +510,7 @@ class AptlyCache:
         """Clear all package index data"""
         conn = self._get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM packages")
+        cursor.execute("DELETE FROM packages_fts")
         conn.commit()
 
     # ==========================================================================
@@ -623,7 +569,7 @@ class AptlyCache:
         cursor.execute("SELECT COUNT(*) FROM published")
         published_count = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM packages")
+        cursor.execute("SELECT COUNT(*) FROM packages_fts")
         package_count = cursor.fetchone()[0]
 
         cursor.execute("""

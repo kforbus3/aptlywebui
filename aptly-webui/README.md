@@ -1,241 +1,278 @@
-# Aptly Web UI
+# Aptly WebUI
 
-A comprehensive web-based interface for managing Aptly repositories. This application provides complete control over mirrors, snapshots, and published repositories without requiring command-line access.
+A modern, production-quality web interface for Aptly repository management. This application provides complete control over mirrors, snapshots, and published repositories without requiring command-line access.
 
 ## Features
 
 ### Core Functionality
 - **Mirror Management**: Create, update, and delete mirrors from external repositories
 - **Snapshot Management**: Create snapshots from mirrors, merge snapshots, and manage their lifecycle
-- **Publish Management**: Publish snapshots as APT repositories and switch between them
-- **Package Search**: Search for packages across all snapshots and published repositories
+- **Publish Management**: Publish snapshots as APT repositories with safe switching
+- **Package Search**: Fast full-text search across all snapshots and repositories
+- **Package Presence**: "Where is this package?" feature for dependency tracking
 
-### Ubuntu ESM Support
-- Full support for Ubuntu Extended Security Maintenance (ESM) repositories
-- Automatic token injection for ESM mirror URLs
-- Visual indicators for ESM mirrors
+### Enterprise Features
+- **Authentication**: JWT-based auth with LDAP and OIDC support
+- **Authorization**: Role-based access control (Admin, Operator, Viewer)
+- **Audit Logging**: Complete audit trail of all operations
+- **Multi-Instance**: Manage multiple Aptly instances (host, Docker, remote)
 
-### Production Ready
-- Responsive React frontend with modern UI
-- Flask-based REST API backend
-- Docker and Docker Compose support
-- Systemd service configuration
-- Health checks and monitoring
+### Ubuntu Support
+- Full support for Ubuntu releases (Bionic, Focal, Jammy, Noble)
+- Ubuntu ESM (Extended Security Maintenance) support
+- Automatic component selection (main, updates, security, backports)
+- Multi-architecture support (amd64, arm64)
 
 ## Quick Start
 
+### Prerequisites
+- Docker and Docker Compose
+- Make (optional, for convenience commands)
+
 ### Docker Compose (Recommended)
 
-1. Clone the repository and navigate to the project:
+1. Clone the repository:
 ```bash
+git clone https://github.com/yourusername/aptly-webui.git
 cd aptly-webui
 ```
 
 2. Create an environment file:
 ```bash
-cat > .env << EOF
-APTLY_WEBUI_PORT=8080
-APTLY_ROOT_DIR=/var/lib/aptly
-ESM_TOKEN=your_esm_token_here
-EOF
+cp .env.example .env
+# Edit .env with your configuration
 ```
 
-3. Start the application:
+3. Start the services:
 ```bash
 docker-compose up -d
 ```
 
-4. Access the Web UI at `http://localhost:8080`
-
-### Manual Installation
-
-1. Install dependencies:
-```bash
-# Backend
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Frontend
-cd ../frontend
-npm install
-npm run build
-```
-
-2. Run the backend:
-```bash
-cd backend
-python app.py
-```
-
-3. Serve the frontend (using nginx or any static file server):
-```bash
-cd frontend/dist
-python -m http.server 3000
-```
-
 4. Access the Web UI at `http://localhost:3000`
-
-### Systemd Installation
-
-For production deployments on systemd-based systems:
-
-```bash
-sudo ./scripts/install.sh
-sudo systemctl start aptly-webui
-sudo systemctl enable aptly-webui
-```
-
-## Configuration
+5. API documentation at `http://localhost:8000/api/docs`
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `APTLY_CLI` | Path to aptly binary | `aptly` |
-| `APTLY_ROOT_DIR` | Aptly root directory | `/var/lib/aptly` |
-| `ESM_TOKEN` | Ubuntu ESM authentication token | - |
-| `FLASK_DEBUG` | Enable Flask debug mode | `false` |
-| `PORT` | Backend port | `5000` |
-
-### Ubuntu ESM Setup
-
-To enable Ubuntu ESM mirroring:
-
-1. Obtain your ESM token from Ubuntu Advantage
-2. Set the `ESM_TOKEN` environment variable
-3. Create mirrors with the "ESM Repository" option enabled
-
-The Web UI will automatically inject the token into ESM URLs when updating mirrors.
-
-## Usage Guide
-
-### Creating a Mirror
-
-1. Navigate to **Mirrors** → **Create Mirror**
-2. Enter mirror details:
-   - Name: A unique identifier (e.g., `debian-bookworm`)
-   - Archive URL: The repository URL (e.g., `http://deb.debian.org/debian`)
-   - Distribution: The release name (e.g., `bookworm`)
-   - Components: Repository sections (e.g., `main, contrib, non-free`)
-3. Optionally configure filters, architectures, and ESM support
-4. Click **Create Mirror**
-
-### Updating a Mirror
-
-1. Navigate to **Mirrors**
-2. Find the mirror you want to update
-3. Click the **Update** button (refresh icon)
-4. Wait for the download to complete
-
-### Creating a Snapshot
-
-1. Navigate to **Snapshots** → **Create Snapshot**
-2. Choose the source:
-   - From Mirror: Freeze the current state of a mirror
-   - Merge Snapshots: Combine multiple snapshots
-   - Empty Snapshot: Start with a blank snapshot
-3. Enter snapshot details and click **Create**
-
-### Publishing a Snapshot
-
-1. Navigate to **Publish** → **Publish Snapshot**
-2. Select the snapshot to publish
-3. Configure:
-   - Distribution: The release name (e.g., `bookworm`)
-   - Prefix: Optional path prefix (e.g., `debian`)
-   - GPG signing options
-4. Click **Publish**
-
-### Searching for Packages
-
-1. Navigate to **Package Search**
-2. Enter a package name or partial match
-3. Optionally toggle search locations (snapshots/published)
-4. Results are grouped by location for easy identification
-
-## API Reference
-
-The backend provides a RESTful API at `/api/`. See `backend/app.py` for complete endpoint documentation.
-
-### Key Endpoints
-
-- `GET /api/mirrors` - List all mirrors
-- `POST /api/mirrors` - Create a new mirror
-- `POST /api/mirrors/{name}/update` - Update a mirror
-- `GET /api/snapshots` - List all snapshots
-- `POST /api/snapshots` - Create a snapshot
-- `GET /api/publish` - List published repositories
-- `POST /api/publish` - Publish a snapshot
-- `GET /api/packages/search?q={query}` - Search packages
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://...` |
+| `REDIS_URL` | Redis connection string | `redis://localhost:6379/0` |
+| `SECRET_KEY` | JWT signing key (change in production) | `development-secret-key...` |
+| `ENCRYPTION_KEY` | Data encryption key (32+ chars) | - |
+| `ENVIRONMENT` | dev/staging/production | `development` |
+| `APTLY_API_URL` | Default Aptly API URL | `http://localhost:8080` |
 
 ## Architecture
 
-### Frontend
-- React 18 with TypeScript
-- TanStack Query for data fetching
-- React Router for navigation
-- Lucide React for icons
-- Custom CSS with CSS variables for theming
+### Technology Stack
 
-### Backend
-- Flask (Python)
-- Direct aptly CLI integration
-- CORS enabled for frontend communication
-- Structured error handling
+#### Frontend
+- **Next.js 15** - React framework with App Router
+- **TypeScript** - Type-safe development
+- **Tailwind CSS** - Utility-first styling
+- **shadcn/ui** - Accessible component library
+- **TanStack Query** - Server state management
 
-### Deployment
-- Docker multi-stage build
-- Nginx reverse proxy
-- Gunicorn WSGI server
-- Systemd service support
+#### Backend
+- **FastAPI** - High-performance Python API framework
+- **SQLAlchemy 2.0** - Async ORM with PostgreSQL
+- **Pydantic v2** - Data validation
+- **Redis + RQ** - Caching and background jobs
+- **structlog** - Structured logging
+
+#### Infrastructure
+- **PostgreSQL 16** - Primary database
+- **Redis 7** - Cache and message queue
+- **Docker** - Containerization
+- **Nginx** - Reverse proxy (optional)
+
+### High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         React Frontend                           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │  Dashboard  │  │   Search    │  │  Mirror/Snapshot/Publish │ │
+│  │   (cached)  │  │   (FTS)     │  │      (paginated)        │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────────────────────────────────────────┐
+│                    FastAPI Backend                               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    API Layer                             │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │   │
+│  │  │   Read      │  │   Write     │  │  Async Tasks    │  │   │
+│  │  │  (cache)    │  │ (validate)  │  │  (background)   │  │   │
+│  │  └──────┬──────┘  └──────┬──────┘  └────────┬────────┘  │   │
+│  └─────────┼────────────────┼──────────────────┼───────────┘   │
+│            │                │                  │               │
+│  ┌─────────▼────────────────▼──────────────────▼───────────┐   │
+│  │                    Data Layer                           │   │
+│  │  ┌─────────────────┐  ┌─────────────────────────────┐   │   │
+│  │  │   PostgreSQL    │  │   Redis Cache/Queue         │   │   │
+│  │  │  (metadata)     │  │                             │   │   │
+│  │  └─────────────────┘  └─────────────────────────────┘   │   │
+│  └────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────────────────────────────────────────┐
+│                      Aptly Integration                           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │  REST API   │  │    CLI      │  │    Docker               │ │
+│  │  (primary)  │  │  (fallback) │  │   (detection)           │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Development
 
+### Setup
+
+1. Install Python dependencies:
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+pip install -e ".[dev]"
+```
+
+2. Install Node.js dependencies:
+```bash
+cd frontend
+npm install
+```
+
+3. Start the database and Redis:
+```bash
+docker-compose up -d db redis
+```
+
+4. Run migrations:
+```bash
+cd backend
+alembic upgrade head
+```
+
 ### Running in Development Mode
 
+Terminal 1 - Backend:
 ```bash
-# Start backend
 cd backend
-python app.py
+uvicorn aptly_webui.main:app --reload --port 8000
+```
 
-# Start frontend (in another terminal)
+Terminal 2 - Frontend:
+```bash
 cd frontend
 npm run dev
 ```
 
-The frontend will proxy API requests to the backend automatically.
-
-### Building for Production
-
+Terminal 3 - Worker (optional):
 ```bash
-cd frontend
-npm run build
+cd backend
+rq worker --url redis://localhost:6379/0
 ```
 
-Static files will be output to `frontend/dist/`.
+The frontend will be available at `http://localhost:3000`
+The API will be at `http://localhost:8000`
+
+### Code Quality
+
+Run linting and formatting:
+```bash
+# Backend
+cd backend
+ruff check src
+ruff format src
+mypy src
+
+# Frontend
+cd frontend
+npm run lint
+npm run format
+```
+
+### Testing
+
+```bash
+# Backend tests
+cd backend
+pytest --cov=aptly_webui
+
+# Frontend tests
+cd frontend
+npm run test
+
+# E2E tests
+cd frontend
+npm run test:e2e
+```
+
+## API Documentation
+
+Once the application is running, API documentation is available at:
+- Swagger UI: `http://localhost:8000/api/docs`
+- ReDoc: `http://localhost:8000/api/redoc`
+- OpenAPI JSON: `http://localhost:8000/api/openapi.json`
+
+## Security
+
+### Authentication
+- JWT-based authentication with access and refresh tokens
+- Password hashing with bcrypt
+- Session management with Redis
+- CSRF protection
+
+### Authorization
+- Role-based access control (RBAC)
+- Roles: Admin, Operator, Viewer, Service
+- Resource-level permissions
+
+### Data Protection
+- Encryption at rest for sensitive data (tokens, passwords)
+- TLS for all communications
+- Input validation with Pydantic
+- SQL injection prevention via ORM
 
 ## Troubleshooting
 
-### Aptly Not Found
-Ensure `aptly` is installed and accessible in the system PATH, or set the `APTLY_CLI` environment variable to the full path.
+### Database Connection Issues
+Ensure PostgreSQL is running and accessible:
+```bash
+docker-compose up -d db
+```
 
-### Permission Errors
-The application needs read/write access to:
-- Aptly root directory (default: `/var/lib/aptly`)
-- GPG home directory (for signing)
+### Redis Connection Issues
+Check Redis is running:
+```bash
+docker-compose up -d redis
+redis-cli ping
+```
 
-### ESM Authentication Failures
-Verify your ESM token is correctly set in the `ESM_TOKEN` environment variable.
-
-## License
-
-MIT License
+### Migration Errors
+If migrations fail, you can reset:
+```bash
+cd backend
+alembic downgrade base
+alembic upgrade head
+```
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## Roadmap
+
+See [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) for the complete development plan.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## Support
 

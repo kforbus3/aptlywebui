@@ -7,20 +7,30 @@ RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
     apt-utils \
+    gcc \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install uv for faster package installation
+RUN pip install uv
+
+# Copy pyproject.toml first for better caching
+COPY pyproject.toml .
+COPY src/aptly_webui/__init__.py src/aptly_webui/
+
+# Install dependencies
+RUN uv pip install --system --no-cache -e ".[dev]"
 
 # Copy application code
-COPY app.py .
-COPY wsgi.py .
+COPY . .
+
+# Install the package
+RUN uv pip install --system --no-cache -e .
 
 # Create non-root user
-RUN useradd -m -u 1000 aptly && chown -R aptly:aptly /app
-USER aptly
+RUN useradd -m -u 1000 aptlywebui && chown -R aptlywebui:aptlywebui /app
+USER aptlywebui
 
-EXPOSE 5000
+EXPOSE 8000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "wsgi:application"]
+CMD ["uvicorn", "aptly_webui.main:app", "--host", "0.0.0.0", "--port", "8000"]
