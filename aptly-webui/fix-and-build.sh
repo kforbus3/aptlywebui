@@ -15,10 +15,9 @@ docker builder prune -af
 
 echo "📁 Cleaning local build artifacts..."
 
-# Remove Next.js build cache
+# Remove Next.js build cache (keep package-lock.json for Docker)
 rm -rf frontend/.next
 rm -rf frontend/node_modules
-rm -rf frontend/package-lock.json
 
 # Remove any Python cache
 find backend -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
