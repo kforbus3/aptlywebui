@@ -12,8 +12,21 @@ RUN npm ci
 # Rebuild the source code only when needed
 FROM base AS builder
 WORKDIR /app
+
+# Copy node_modules from deps stage
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+
+# Copy configuration files
+COPY package.json package-lock.json ./
+COPY next.config.mjs ./
+COPY tsconfig.json ./
+COPY tailwind.config.ts ./
+COPY postcss.config.mjs ./
+COPY components.json ./
+
+# Copy source code (explicitly exclude old files)
+COPY public ./public
+COPY src ./src
 
 # Build the application
 ENV NEXT_TELEMETRY_DISABLED 1
