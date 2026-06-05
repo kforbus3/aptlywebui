@@ -67,7 +67,7 @@ export default function MirrorDetailPage() {
   const params = useParams();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const mirrorName = decodeURIComponent(params.name as string);
+  const mirrorName = params.name ? decodeURIComponent(params.name as string) : "";
   const [showDelete, setShowDelete] = useState(false);
   const [updateProgress, setUpdateProgress] = useState(0);
   const [isUpdating, setIsUpdating] = useState(false);
