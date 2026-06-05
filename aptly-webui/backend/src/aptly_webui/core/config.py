@@ -72,9 +72,9 @@ class Settings(BaseSettings):
     )
 
     # CORS
-    cors_origins: list[str] = Field(
-        default=["http://localhost:3000"],
-        description="Allowed CORS origins",
+    cors_origins: str = Field(
+        default="http://localhost:3000",
+        description="Allowed CORS origins (comma-separated)",
     )
     cors_allow_credentials: bool = Field(default=True)
     cors_allow_methods: list[str] = Field(default=["*"])
@@ -135,13 +135,6 @@ class Settings(BaseSettings):
         description="OIDC redirect URI",
     )
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
-        """Parse CORS origins from string or list."""
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
 
     @field_validator("encryption_key")
     @classmethod
