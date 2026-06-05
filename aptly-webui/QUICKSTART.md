@@ -17,7 +17,7 @@ Edit `docker-compose.simple.yml` and change these values:
 ### 2. Start Containers
 
 ```bash
-docker-compose -f docker-compose.simple.yml up -d
+docker compose -f docker-compose.simple.yml up -d
 ```
 
 ### 3. Access
@@ -57,19 +57,24 @@ asyncio.run(create_admin())
 
 ```bash
 # Start
-docker-compose -f docker-compose.simple.yml up -d
+docker compose -f docker-compose.simple.yml up -d
 
 # Stop
-docker-compose -f docker-compose.simple.yml down
+docker compose -f docker-compose.simple.yml down
 
 # View logs
-docker-compose -f docker-compose.simple.yml logs -f
+docker compose -f docker-compose.simple.yml logs -f
 
 # Restart
-docker-compose -f docker-compose.simple.yml restart
+docker compose -f docker-compose.simple.yml restart
 
 # Update after code changes
-docker-compose -f docker-compose.simple.yml up -d --build
+docker compose -f docker-compose.simple.yml up -d --build
+
+# Or use the helper script
+./commands.sh up
+./commands.sh down
+./commands.sh logs
 ```
 
 ## What This Does

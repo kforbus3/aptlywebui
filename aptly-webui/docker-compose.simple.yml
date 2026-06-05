@@ -1,5 +1,3 @@
-version: '3.8'
-
 # SIMPLE DOCKER COMPOSE - No nginx, no port 80/443
 # Uses alternate ports so it doesn't conflict with your existing webserver
 
