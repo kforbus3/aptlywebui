@@ -1,0 +1,81 @@
+version: '3.8'
+
+# SIMPLE DOCKER COMPOSE - No nginx, no port 80/443
+# Uses alternate ports so it doesn't conflict with your existing webserver
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: aptly-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aptly
+      POSTGRES_PASSWORD: aptly_password_change_me
+      POSTGRES_DB: aptly_webui
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - aptly-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: aptly-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - aptly-network
+
+  # Backend API - Exposed on port 8000
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aptly-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aptly:aptly_password_change_me@db:5432/aptly_webui
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=change-this-to-a-random-string-min-32-chars
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=15
+      - REFRESH_TOKEN_EXPIRE_DAYS=7
+      - APTLY_API_URL=http://your-aptly-server:8080
+      - ENVIRONMENT=production
+      # CORS - Allow frontend running on port 3000 to access backend on port 8000
+      # Replace your-server-ip with your actual server IP or domain
+      - CORS_ORIGINS=http://your-server-ip:3000,http://localhost:3000
+    ports:
+      - "8000:8000"  # Backend API on port 8000
+    depends_on:
+      - db
+      - redis
+    networks:
+      - aptly-network
+
+  # Frontend - Exposed on port 3000
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aptly-frontend
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=http://your-server-ip:8000
+      - PORT=3000
+    ports:
+      - "3000:3000"  # Frontend on port 3000
+    depends_on:
+      - backend
+    networks:
+      - aptly-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  aptly-network:
+    driver: bridge

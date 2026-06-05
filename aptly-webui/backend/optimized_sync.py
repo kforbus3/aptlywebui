@@ -268,8 +268,8 @@ class OptimizedSyncService:
             def index_snapshot(snap):
                 name = snap['name']
                 try:
-                    # Use the /packages endpoint to get package list
-                    packages = self._api_get(f'snapshots/{name}/packages', timeout=30)
+                    detail = self._api_get(f'snapshots/{name}', timeout=15)
+                    packages = detail.get('Packages', [])
 
                     if packages:
                         return self.cache.index_packages(

@@ -183,84 +183,6 @@ def list_published():
         logger.error(f"Failed to list published: {e}")
         return jsonify({'published': [], 'error': str(e)})
 
-# Direct database functions to bypass cached module
-def _get_db_connection():
-    """Get direct database connection"""
-    import sqlite3
-    conn = sqlite3.connect(CACHE_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def _search_packages_direct(query: str, limit: int = 100) -> list:
-    """Search packages directly from database"""
-    try:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-
-        # Check if packages table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='packages'")
-        if not cursor.fetchone():
-            return []
-
-        # Use LIKE search
-        pattern = f'%{query}%'
-        cursor.execute("""
-            SELECT package_name, version, architecture, source_name, source_type, 0 as rank
-            FROM packages
-            WHERE package_name LIKE ?
-            LIMIT ?
-        """, (pattern, limit))
-
-        rows = cursor.fetchall()
-
-        # Transform results to match frontend expectations
-        results = []
-        for row in rows:
-            result = dict(row)
-            # Map database fields to frontend expected format
-            transformed = {
-                'package': result.get('package_name', ''),
-                'version': result.get('version', ''),
-                'architecture': result.get('architecture', ''),
-                'type': result.get('source_type', 'snapshot'),
-                'name': result.get('source_name', '') if result.get('source_type') == 'snapshot' else None,
-                'prefix': '',
-                'distribution': result.get('source_name', '') if result.get('source_type') == 'published' else None,
-                'location': result.get('source_name', '')
-            }
-            results.append(transformed)
-
-        return results
-    except Exception as e:
-        logger.error(f"Direct search error: {e}")
-        return []
-    finally:
-        conn.close()
-
-def _get_stats_direct() -> dict:
-    """Get stats directly from database"""
-    try:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-
-        stats = {'total_mirrors': 0, 'total_snapshots': 0, 'total_published': 0, 'total_packages': 0}
-
-        # Check if tables exist and get counts
-        for table in ['mirrors', 'snapshots', 'published', 'packages']:
-            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
-            if cursor.fetchone():
-                cursor.execute(f"SELECT COUNT(*) FROM {table}")
-                count = cursor.fetchone()[0]
-                key = f'total_{table}' if table != 'published' else 'total_published'
-                stats[key] = count
-
-        return stats
-    except Exception as e:
-        logger.error(f"Direct stats error: {e}")
-        return {'total_mirrors': 0, 'total_snapshots': 0, 'total_published': 0, 'total_packages': 0}
-    finally:
-        conn.close()
-
 @app.route('/api/packages/search', methods=['GET'])
 def search_packages():
     """Search packages using FTS"""
@@ -269,13 +191,7 @@ def search_packages():
         return jsonify({'results': [], 'total': 0})
 
     try:
-        # Try direct search first
-        results = _search_packages_direct(query, limit=100)
-
-        # Fall back to cache if direct fails
-        if not results:
-            results = cache.search_packages(query, limit=100)
-
+        results = cache.search_packages(query, limit=100)
         return jsonify({
             'query': query,
             'total': len(results),
@@ -296,15 +212,7 @@ def health_check():
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     try:
-        # Try direct database query first
-        stats = _get_stats_direct()
-
-        # If direct returns 0s, try cache
-        if stats['total_snapshots'] == 0:
-            cache_stats = cache.get_stats()
-            if cache_stats.get('total_snapshots', 0) > 0:
-                stats = cache_stats
-
+        stats = cache.get_stats()
         return jsonify({'stats': stats, 'cache_enabled': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -318,124 +226,6 @@ def trigger_sync():
         return jsonify({'success': True, 'result': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/cache/index-packages', methods=['POST'])
-def index_packages():
-    """Index packages for search"""
-    try:
-        max_snapshots = request.json.get('max_snapshots', 50) if request.json else 50
-        if sync_service and hasattr(sync_service, 'index_packages_limited'):
-            result = sync_service.index_packages_limited(max_snapshots)
-            return jsonify({'success': True, 'result': result})
-        else:
-            return jsonify({'success': False, 'error': 'Sync service not available'}), 400
-    except Exception as e:
-        logger.error(f"Package indexing failed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/snapshots/<name>', methods=['GET'])
-def get_snapshot(name):
-    """Get single snapshot details (with lazy loading)"""
-    try:
-        # Try cache first
-        snapshot = cache.get_snapshot(name)
-
-        # If not in cache or no details, fetch from API
-        if not snapshot or not snapshot.get('sources'):
-            logger.info(f"Fetching snapshot {name} from API (lazy load)")
-            detail = aptly_api_get(f'snapshots/{name}')
-
-            # Get package count from /packages endpoint
-            try:
-                packages = aptly_api_get(f'snapshots/{name}/packages')
-                num_packages = len(packages)
-            except:
-                num_packages = 0
-
-            snapshot = {
-                'name': name,
-                'created_at': detail.get('CreatedAt', ''),
-                'description': detail.get('Description', ''),
-                'num_packages': num_packages,
-                'sources': detail.get('Sources', [])
-            }
-            # Update cache
-            cache.save_snapshots([snapshot])
-
-        return jsonify({'snapshot': snapshot})
-    except Exception as e:
-        logger.error(f"Failed to get snapshot {name}: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/mirrors/<name>', methods=['GET'])
-def get_mirror(name):
-    """Get single mirror details"""
-    try:
-        mirror = cache.get_mirror(name)
-        if not mirror:
-            detail = aptly_api_get(f'mirrors/{name}')
-            mirror = {
-                'name': name,
-                'archive_root': detail.get('ArchiveRoot', ''),
-                'distribution': detail.get('Distribution', ''),
-                'components': detail.get('Components', []),
-                'architectures': detail.get('Architectures', []),
-                'last_updated': detail.get('LastDownloadDate', ''),
-                'num_packages': detail.get('PackageCount', 0),
-                'download_size': str(detail.get('DownloadSize', '0'))
-            }
-        return jsonify({'mirror': mirror})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/packages/count', methods=['GET'])
-def get_package_count():
-    """Get total package count across all snapshots"""
-    try:
-        stats = _get_stats_direct()
-        return jsonify({
-            'total_packages': stats.get('total_packages', 0),
-            'note': 'Package count from indexed snapshots only'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# =============================================================================
-# Settings/Config Endpoints (Stubs to prevent 404s)
-# =============================================================================
-
-@app.route('/api/config', methods=['GET'])
-def get_config():
-    """Get Aptly configuration (stub)"""
-    return jsonify({
-        'config': {
-            'root_dir': '/var/lib/aptly',
-            'download_concurrency': 4,
-            'download_speed_limit': 0,
-            'architectures': [],
-            'dependency_follow_suggests': False,
-            'dependency_follow_recommends': False,
-            'dependency_follow_all_variants': False
-        }
-    })
-
-@app.route('/api/esm/status', methods=['GET'])
-def get_esm_status():
-    """Get ESM token status (stub)"""
-    return jsonify({
-        'esm_configured': False,
-        'message': 'ESM not configured'
-    })
-
-@app.route('/api/db/cleanup', methods=['POST'])
-def db_cleanup():
-    """Database cleanup (stub)"""
-    return jsonify({'success': True, 'message': 'Cleanup completed'})
-
-@app.route('/api/db/recover', methods=['POST'])
-def db_recover():
-    """Database recovery (stub)"""
-    return jsonify({'success': True, 'message': 'Recovery completed'})
 
 # =============================================================================
 # Main Entry Point
