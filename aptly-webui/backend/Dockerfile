@@ -14,14 +14,15 @@ RUN apt-get update && apt-get install -y \
 # Install uv for faster package installation
 RUN pip install uv
 
-# Copy pyproject.toml first for better caching
+# Copy pyproject.toml and README first for better caching
 COPY pyproject.toml .
+COPY README.md .
 COPY src/aptly_webui/__init__.py src/aptly_webui/
 
 # Install dependencies
 RUN uv pip install --system --no-cache -e ".[dev]"
 
-# Copy application code
+# Copy rest of application code
 COPY . .
 
 # Install the package
