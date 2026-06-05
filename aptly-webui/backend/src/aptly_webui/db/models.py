@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -260,7 +261,7 @@ class Snapshot(Base):
 
     __table_args__ = (
         # Unique constraint on aptly_id + name
-        {" UniqueConstraint": ["aptly_id", "name"]},
+        UniqueConstraint("aptly_id", "name"),
     )
 
 
@@ -310,7 +311,7 @@ class Publish(Base):
 
     __table_args__ = (
         # Unique constraint on aptly_id + distribution + component + prefix
-        {" UniqueConstraint": ["aptly_id", "distribution", "component", "prefix"]},
+        UniqueConstraint("aptly_id", "distribution", "component", "prefix"),
     )
 
 
@@ -462,5 +463,5 @@ class Package(Base):
 
     __table_args__ = (
         # Unique constraint on aptly_id + aptly_key
-        {" UniqueConstraint": ["aptly_id", "aptly_key"]},
+        UniqueConstraint("aptly_id", "aptly_key"),
     )
