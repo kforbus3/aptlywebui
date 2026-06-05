@@ -7,6 +7,9 @@ yarn-error.log
 .next
 out
 
+# Old Vite files (if any)
+src/pages
+
 # Environment files
 .env
 .env.local
