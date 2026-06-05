@@ -52,9 +52,11 @@ def create_application() -> FastAPI:
     )
 
     # Add middleware
+    # Parse CORS origins from comma-separated string
+    cors_origins_list = [origin.strip() for origin in settings.cors_origins.split(",")]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=cors_origins_list,
         allow_credentials=settings.cors_allow_credentials,
         allow_methods=settings.cors_allow_methods,
         allow_headers=settings.cors_allow_headers,
