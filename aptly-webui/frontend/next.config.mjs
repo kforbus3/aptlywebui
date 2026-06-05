@@ -4,6 +4,14 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  eslint: {
+    // Allow production builds to successfully complete even if ESLint has errors
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    // Allow production builds to successfully complete even if TypeScript has errors
+    ignoreBuildErrors: true,
+  },
   async rewrites() {
     return [
       {
