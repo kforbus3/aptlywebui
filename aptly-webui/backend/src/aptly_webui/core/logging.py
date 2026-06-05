@@ -13,31 +13,27 @@ def configure_logging() -> None:
     """Configure structured logging."""
     timestamper = structlog.processors.TimeStamper(fmt="iso")
 
+    # Standard processors without add_logger_name (causes issues with PrintLogger)
+    shared_processors: list[structlog.types.Processor] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        timestamper,
+        structlog.processors.format_exc_info,
+        structlog.stdlib.ExtraAdder(),
+    ]
+
     if settings.structured_logging:
         # Structured JSON logging for production
-        shared_processors: list[structlog.types.Processor] = [
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            timestamper,
-            structlog.processors.format_exc_info,
-            structlog.stdlib.ExtraAdder(),
+        shared_processors.extend([
             structlog.processors.UnicodeDecoder(),
             structlog.processors.JSONRenderer(),
-        ]
+        ])
     else:
         # Human-readable logging for development
-        shared_processors = [
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            timestamper,
-            structlog.processors.format_exc_info,
-            structlog.stdlib.ExtraAdder(),
+        shared_processors.append(
             structlog.dev.ConsoleRenderer(colors=True),
-        ]
+        )
 
     structlog.configure(
         processors=shared_processors,
@@ -45,7 +41,7 @@ def configure_logging() -> None:
             getattr(logging, settings.log_level)
         ),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=False,
     )
 
