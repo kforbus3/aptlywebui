@@ -1,0 +1,42 @@
+services:
+  aptly:
+    build: ./aptly
+    image: aptly-webui-aptly
+    container_name: aptly
+    restart: unless-stopped
+    volumes:
+      - aptly-data:/data/aptly
+      - gpg:/root/.gnupg
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  webui:
+    build: .
+    image: aptly-webui
+    container_name: aptly-webui
+    restart: unless-stopped
+    depends_on:
+      - aptly
+    ports:
+      - "8000:8000"
+    environment:
+      # CHANGE THESE before any real deployment.
+      - SECRET_KEY=${SECRET_KEY:-please-change-this-secret-key}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - APTLY_API_URL=http://aptly:8080
+      - DATA_DIR=/data/webui
+      - APTLY_ROOT_DIR=/data/aptly
+    volumes:
+      - webui-data:/data/webui
+      # Mounted so the UI can back up / restore aptly's state and share the keyring.
+      - aptly-data:/data/aptly
+      - gpg:/root/.gnupg
+
+volumes:
+  aptly-data:
+  webui-data:
+  gpg:

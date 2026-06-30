@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node / frontend build
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local env & data
+.env
+*.db
+*.sqlite
+/data/
+backend/data/
+
+# Secrets / keys — never commit
+*.key
+*.asc
+*.gpg
+!frontend/public/favicon.svg
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
