@@ -4,9 +4,11 @@ A sleek, self-hosted web frontend for managing an [aptly](https://www.aptly.info
 Debian/Ubuntu package repository — so admins can run mirrors, snapshots, and
 signed publishing from the browser instead of the command line.
 
-It pairs naturally with a Docker-based aptly server (see
-[`docker-aptly`](https://github.com/kforbus3/docker-aptly)) and ships as a single
-container plus a paired aptly API service.
+**One deploy gives you everything.** `docker compose up` brings up the aptly
+engine, the web management UI, **and** a repo server that serves your published
+repositories to `apt` clients — no other components to wire up. (Prefer a
+minimal, no-UI, drop-files-and-publish server instead? See the companion
+[`docker-aptly`](https://github.com/kforbus3/docker-aptly) project.)
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688.svg)
@@ -38,7 +40,8 @@ container plus a paired aptly API service.
   - **Backup & restore** — one-click snapshots of aptly state + the UI database.
 - **Manages _and_ serves** — a bundled repo server (nginx) publishes your signed
   repositories and signing key over HTTP so `apt` clients can install straight
-  away. One `docker compose up`, nothing else to wire.
+  away. One `docker compose up`, nothing else to wire. An optional Caddy overlay
+  adds **HTTPS with automatic Let's Encrypt certificates**.
 - **Lightweight by design** — FastAPI + SQLite, no Postgres/Redis required.
 - **Single sign-on session** — JWT auth with automatic token refresh; the signing
   secret persists across restarts so sessions survive redeploys.
@@ -94,6 +97,17 @@ That's it — the compose stack runs the web UI (management, **:8000**), a paire
 aptly API service, and a repo server (**:80**) that serves your published
 repositories to `apt` clients. To serve on a different host port (e.g. if 80 is
 taken), set `REPO_HTTP_PORT` in `.env`.
+
+**Want HTTPS?** Point two DNS names at the host, set `WEBUI_DOMAIN` and
+`REPO_DOMAIN` in `.env`, and add the TLS overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+```
+
+A bundled Caddy front terminates TLS for both the UI and the repo with automatic
+Let's Encrypt certificates (redirecting HTTP→HTTPS). See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#tls-https-with-automatic-certificates).
 
 ## First workflow
 

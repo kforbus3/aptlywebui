@@ -30,24 +30,37 @@ the table in the [README](../README.md#configuration)). The most important:
 - `SECRET_KEY` — set a strong, fixed value.
 - `ADMIN_PASSWORD` — set before first start; change it after logging in.
 
-## TLS
+## TLS (HTTPS with automatic certificates)
 
-Front the UI with a reverse proxy that terminates HTTPS, e.g. nginx or Caddy:
+The repo ships an optional **Caddy** front (`docker-compose.tls.yml`) that
+terminates HTTPS for both the management UI and the apt repository, obtaining and
+renewing **Let's Encrypt** certificates automatically.
 
-```nginx
-server {
-    listen 443 ssl;
-    server_name aptly.example.com;
-    ssl_certificate     /etc/letsencrypt/live/aptly.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/aptly.example.com/privkey.pem;
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
+1. Point two DNS names at the host (one for the UI, one for the repo) and set
+   them in `.env`:
+
+   ```bash
+   WEBUI_DOMAIN=aptly.example.com
+   REPO_DOMAIN=repo.example.com
+   ```
+
+2. Bring the stack up with the TLS overlay:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+   ```
+
+Caddy takes over ports **80** (redirects to HTTPS) and **443**, and proxies to
+the internal `webui` and `repo` services — which the overlay stops publishing
+directly. Certificates are persisted in the `caddy-data` volume, so restarts do
+not re-request them. Clients then use `https://repo.example.com/` in their
+`sources.list`; the *apt setup* helper on the Published page fills in the exact
+commands.
+
+> Trying it locally without DNS? Set `WEBUI_DOMAIN=webui.localhost` and
+> `REPO_DOMAIN=repo.localhost` — Caddy serves those over HTTPS using its own
+> internal CA. To add a certificate-expiry email, drop a global `{ email … }`
+> block at the top of [`caddy/Caddyfile`](../caddy/Caddyfile).
 
 ## Serving published repositories to apt clients
 

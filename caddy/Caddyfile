@@ -1,0 +1,26 @@
+# Caddy TLS front for the aptly-webui stack.
+#
+# Terminates HTTPS for two virtual hosts, each proxied to an internal service:
+#   - the management web UI  → webui:8000
+#   - the apt repository      → repo:80
+#
+# Caddy automatically obtains and renews Let's Encrypt certificates for public
+# domains, and redirects HTTP→HTTPS. For local names (e.g. *.localhost) it uses
+# its own internal CA, which makes the stack easy to try over HTTPS without
+# public DNS.
+#
+# To receive certificate-expiry notices, add a global options block with your
+# email at the top of this file:
+#     {
+#         email you@example.com
+#     }
+
+# Management web UI.
+{$WEBUI_DOMAIN} {
+	reverse_proxy webui:8000
+}
+
+# Published apt repositories and the signing public key (/gpg/public.key).
+{$REPO_DOMAIN} {
+	reverse_proxy repo:80
+}
