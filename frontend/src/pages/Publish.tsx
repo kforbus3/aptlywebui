@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { UploadCloud, Plus, Trash2, RefreshCw } from "lucide-react";
+import { UploadCloud, Plus, Trash2, RefreshCw, Terminal } from "lucide-react";
 import { api, apiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useToast } from "../components/Toast";
@@ -39,6 +39,7 @@ export default function Publish() {
   const [showCreate, setShowCreate] = useState(false);
   const [switchTarget, setSwitchTarget] = useState<Published | null>(null);
   const [refreshTarget, setRefreshTarget] = useState<Published | null>(null);
+  const [setupTarget, setSetupTarget] = useState<Published | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["publish"],
@@ -83,23 +84,28 @@ export default function Publish() {
                 <td className="px-4 py-3 text-slate-400">{p.Sources?.map((s) => s.Name).join(", ")}</td>
                 <td className="px-4 py-3 text-slate-400">{p.Architectures?.join(", ")}</td>
                 <td className="px-4 py-3">
-                  {canEdit && (
-                    <div className="flex justify-end gap-1">
-                      {p.SourceKind === "local" ? (
-                        <Button size="sm" variant="secondary" onClick={() => setRefreshTarget(p)}>
-                          <RefreshCw size={13} /> Refresh
+                  <div className="flex justify-end gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => setSetupTarget(p)} title="apt client setup">
+                      <Terminal size={14} className="text-slate-400" />
+                    </Button>
+                    {canEdit && (
+                      <>
+                        {p.SourceKind === "local" ? (
+                          <Button size="sm" variant="secondary" onClick={() => setRefreshTarget(p)}>
+                            <RefreshCw size={13} /> Refresh
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="secondary" onClick={() => setSwitchTarget(p)}>
+                            <RefreshCw size={13} /> Switch
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost"
+                          onClick={() => { if (confirm(`Unpublish "${displayPrefix(p)}/${p.Distribution}"?`)) unpublish.mutate(p); }}>
+                          <Trash2 size={14} className="text-red-400" />
                         </Button>
-                      ) : (
-                        <Button size="sm" variant="secondary" onClick={() => setSwitchTarget(p)}>
-                          <RefreshCw size={13} /> Switch
-                        </Button>
-                      )}
-                      <Button size="sm" variant="ghost"
-                        onClick={() => { if (confirm(`Unpublish "${displayPrefix(p)}/${p.Distribution}"?`)) unpublish.mutate(p); }}>
-                        <Trash2 size={14} className="text-red-400" />
-                      </Button>
-                    </div>
-                  )}
+                      </>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -109,7 +115,58 @@ export default function Publish() {
       {showCreate && <PublishForm onClose={() => setShowCreate(false)} />}
       {switchTarget && <SwitchSnapshot target={switchTarget} onClose={() => setSwitchTarget(null)} />}
       {refreshTarget && <RefreshRepo target={refreshTarget} onClose={() => setRefreshTarget(null)} />}
+      {setupTarget && <ClientSetup target={setupTarget} onClose={() => setSetupTarget(null)} />}
     </div>
+  );
+}
+
+// Shows copy-paste apt client setup commands for a publication, using the repo
+// server (this host) — the bundled nginx serves the repo at / and the signing
+// key at /gpg/public.key.
+function ClientSetup({ target, onClose }: { target: Published; onClose: () => void }) {
+  const toast = useToast();
+  const [port, setPort] = useState("");
+  const host = window.location.hostname;
+  const base = `http://${host}${port ? `:${port}` : ""}`;
+  const prefix = target.Prefix && target.Prefix !== "." ? `${target.Prefix.replace(/^\/+|\/+$/g, "")}/` : "";
+  const components = (target.Sources?.map((s) => s.Component).filter(Boolean).join(" ")) || "main";
+  const keyring = "/usr/share/keyrings/aptly-repo.gpg";
+  const script = [
+    `# Import the repository signing key`,
+    `curl -fsSL ${base}/gpg/public.key | sudo gpg --dearmor -o ${keyring}`,
+    ``,
+    `# Add the repository`,
+    `echo "deb [signed-by=${keyring}] ${base}/${prefix} ${target.Distribution} ${components}" \\`,
+    `  | sudo tee /etc/apt/sources.list.d/aptly-repo.list`,
+    ``,
+    `sudo apt update`,
+  ].join("\n");
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`apt setup — ${displayPrefix(target)}/${target.Distribution}`}
+      footer={<Button variant="secondary" onClick={onClose}>Close</Button>}
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-slate-400">
+          Run these on a Debian/Ubuntu client to install from this repository. The bundled
+          repo server serves the packages and signing key on this host.
+        </p>
+        <div>
+          <Label>Repo server port (if not 80)</Label>
+          <Input value={port} onChange={(e) => setPort(e.target.value.replace(/[^0-9]/g, ""))} placeholder="80" />
+        </div>
+        <pre className="overflow-x-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-200 whitespace-pre">{script}</pre>
+        <Button
+          variant="secondary"
+          onClick={() => { navigator.clipboard?.writeText(script); toast.success("Copied to clipboard"); }}
+        >
+          Copy commands
+        </Button>
+      </div>
+    </Modal>
   );
 }
 

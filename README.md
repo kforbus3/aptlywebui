@@ -36,6 +36,9 @@ container plus a paired aptly API service.
   - **Scheduled syncs** — cron-based automatic mirror updates that can optionally
     snapshot and re-publish, configured entirely from a guided form.
   - **Backup & restore** — one-click snapshots of aptly state + the UI database.
+- **Manages _and_ serves** — a bundled repo server (nginx) publishes your signed
+  repositories and signing key over HTTP so `apt` clients can install straight
+  away. One `docker compose up`, nothing else to wire.
 - **Lightweight by design** — FastAPI + SQLite, no Postgres/Redis required.
 - **Single sign-on session** — JWT auth with automatic token refresh; the signing
   secret persists across restarts so sessions survive redeploys.
@@ -43,24 +46,31 @@ container plus a paired aptly API service.
 
 ## Architecture
 
+The compose stack runs three services sharing an `aptly-data` volume:
+
 ```
-                      ┌────────────────────── aptly-webui (one container) ──────────────────────┐
-  browser  ──HTTP──▶  │  FastAPI  ──serves──▶  React SPA (built, static)                          │
-                      │     │                                                                     │
-                      │     ├── JWT auth · RBAC · audit log · scheduler   →  SQLite (UI state)     │
-                      │     └── proxy ──HTTP──▶  aptly REST API                                    │
-                      └───────────────────────────────────┬──────────────────────────────────────┘
-                                                           │
-                                          ┌────────────────▼─────────────────┐
-                                          │  aptly (api serve)  ── /data/aptly │  ← shared volume
-                                          └────────────────────────────────────┘
+                       ┌──────────── webui (FastAPI + React SPA) ─── :8000 (management) ─┐
+  admin browser ──▶    │  JWT auth · RBAC · audit log · scheduler  →  SQLite (UI state)   │
+                       │  proxy ──▶ aptly REST API   ·   exports signing public key       │
+                       └───────────────┬───────────────────────────────┬─────────────────┘
+                                       │                                │
+                       ┌───────────────▼────────────┐        writes public.key
+                       │  aptly (api serve)          │                  │
+                       │  /data/aptly  (shared vol)  │        ┌─────────▼──────────────────┐
+                       └───────────────┬────────────┘        │  repo (nginx) ─ :80         │
+                                       │  publishes to        │  serves /data/aptly/public  │
+                                       └── /data/aptly/public ▶│  and /gpg/public.key        │
+  apt clients ────────────────────────────────────────────▶  └─────────────────────────────┘
 ```
 
 - The UI **never touches aptly's database directly** — it speaks to aptly's REST
   API (`aptly api serve`).
 - The UI's own state (users, audit log, schedules) lives in **SQLite**.
-- The UI and aptly **share a GPG keyring** (a Docker volume) so keys you manage in
-  the UI are available to aptly for signing.
+- The UI and aptly **share a GPG keyring** (a Docker volume); keys you generate or
+  import in the UI are used by aptly for signing, and the UI exports the public
+  half for the repo server to hand to clients.
+- The **repo server** mounts the aptly data **read-only** and serves only the
+  published tree plus the signing public key — never aptly's database.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detail.
 
@@ -80,8 +90,10 @@ Open **http://localhost:8000** and sign in with the admin credentials from your
 `.env` (default `admin` / `admin`). **Change the password immediately** from the
 account menu.
 
-That's it — the compose stack runs both the web UI and a paired aptly API service
-with shared aptly-data and GPG-keyring volumes.
+That's it — the compose stack runs the web UI (management, **:8000**), a paired
+aptly API service, and a repo server (**:80**) that serves your published
+repositories to `apt` clients. To serve on a different host port (e.g. if 80 is
+taken), set `REPO_HTTP_PORT` in `.env`.
 
 ## First workflow
 
@@ -89,16 +101,23 @@ with shared aptly-data and GPG-keyring volumes.
 2. **Mirrors** → *New Mirror* (pick a preset) → *Sync* (runs in the background).
 3. **Snapshots** → create a snapshot from the mirror (or a local repo).
 4. **Published** → *Publish* the snapshot with GPG signing.
-5. Point a client at `http://<host>/…` exactly as you would any apt repo.
+5. On the **Published** page, click the terminal icon for copy-paste `apt` client
+   setup commands, then run them on any Debian/Ubuntu box.
 
 For hosting your own packages: **Local Repos** → create a repo → *Upload .deb* →
 **Published** → *Publish* it directly (source type *Local Repo*). After uploading
 or removing more packages, hit *Refresh* on the publication — no re-snapshotting
 needed. Prefer immutable releases? Snapshot the repo and publish that instead.
 
-> Serving the published files over HTTP (so `apt` clients can reach them) is the
-> job of a web server pointed at aptly's `public/` directory — see the companion
-> [`docker-aptly`](https://github.com/kforbus3/docker-aptly) project, which bundles nginx for exactly this.
+The bundled repo server serves everything clients need — no extra web server to
+configure. On a client:
+
+```bash
+curl -fsSL http://<host>/gpg/public.key | sudo gpg --dearmor -o /usr/share/keyrings/aptly-repo.gpg
+echo "deb [signed-by=/usr/share/keyrings/aptly-repo.gpg] http://<host>/ stable main" \
+  | sudo tee /etc/apt/sources.list.d/aptly-repo.list
+sudo apt update
+```
 
 ## Roles
 
@@ -120,6 +139,8 @@ Set via environment variables (see [`.env.example`](.env.example)):
 | `DATA_DIR` | `/data/webui` | Where the UI's SQLite DB and backups live |
 | `APTLY_ROOT_DIR` | `/data/aptly` | aptly's data dir (for backup/restore) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | Access-token lifetime |
+| `PUBLIC_KEY_PATH` | `/data/keys/public.key` | Where the UI exports the signing public key for the repo server to serve |
+| `REPO_HTTP_PORT` | `80` | Host port the repo server listens on (compose only) |
 
 ## Development
 

@@ -7,18 +7,20 @@ cp .env.example .env          # set SECRET_KEY + ADMIN_PASSWORD
 docker compose up -d --build
 ```
 
-This starts two services on an internal network:
+This starts three services on an internal network:
 
 | Service | Image | Ports | Volumes |
 |---------|-------|-------|---------|
-| `webui` | built from repo root | `8000:8000` | `webui-data`, `aptly-data`, `gpg` |
+| `webui` | built from repo root | `8000:8000` (management UI) | `webui-data`, `aptly-data`, `gpg`, `repo-keys` |
 | `aptly` | `aptly api serve` | internal only | `aptly-data`, `gpg` |
+| `repo` | `nginx` | `${REPO_HTTP_PORT:-80}:80` (apt clients) | `aptly-data` (ro), `repo-keys` (ro) |
 
 Volumes:
 
 - `webui-data` → `/data/webui` — SQLite DB and UI backups
 - `aptly-data` → `/data/aptly` — aptly database and published repositories
 - `gpg` → `/root/.gnupg` — shared signing keyring (UI + aptly)
+- `repo-keys` → `/data/keys` — the exported signing public key the repo server serves
 
 ## Configuration
 
@@ -49,11 +51,24 @@ server {
 
 ## Serving published repositories to apt clients
 
-`aptly api serve` writes published repos under `/data/aptly/public`. To serve them
-to apt clients, point a web server at that directory (the companion
-[`docker-aptly`](https://github.com/kforbus3/docker-aptly) project does exactly
-this with nginx), or add an nginx service to the compose file mounting
-`aptly-data` and serving `/data/aptly/public`.
+The bundled `repo` service (nginx) already does this — it serves aptly's
+published tree (`/data/aptly/public`) and the exported signing public key on
+`REPO_HTTP_PORT` (default **80**). It mounts the aptly data **read-only** and
+exposes only the published subtree plus `/gpg/public.key`; aptly's database is
+never served.
+
+On a client:
+
+```bash
+curl -fsSL http://<host>/gpg/public.key | sudo gpg --dearmor -o /usr/share/keyrings/aptly-repo.gpg
+echo "deb [signed-by=/usr/share/keyrings/aptly-repo.gpg] http://<host>/ <dist> <component>" \
+  | sudo tee /etc/apt/sources.list.d/aptly-repo.list
+sudo apt update
+```
+
+The **Published** page has a per-publication *apt setup* helper (terminal icon)
+that generates these exact commands. For public/production use, front the `repo`
+service with a TLS-terminating proxy too, and serve the key over HTTPS.
 
 ## Backups
 

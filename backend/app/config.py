@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     cors_origins: str = "*"
     # Where aptly stores its data on disk (used by backup/restore).
     aptly_root_dir: str = "/data/aptly"
+    # File where the signing public key is exported (armored) for apt clients.
+    # The bundled nginx service serves this at /gpg/public.key. Set empty to
+    # disable the export.
+    public_key_path: str = "/data/keys/public.key"
 
     @property
     def db_path(self) -> str:
