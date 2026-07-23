@@ -43,8 +43,10 @@ filter the log in the UI or via `GET /api/audit`.
 
 ## Network exposure
 
-- The app serves **HTTP** on port 8000. Put it behind a TLS-terminating reverse
-  proxy before exposing it beyond a trusted network.
+- The app serves **HTTP** on ports 8000 (UI) and 80 (repo). Before exposing it
+  beyond a trusted network, terminate TLS — the bundled Caddy overlay
+  (`docker-compose.tls.yml`) does this with automatic Let's Encrypt certificates
+  (see [DEPLOYMENT.md](DEPLOYMENT.md#tls-https-with-automatic-certificates)).
 - The paired aptly API has no authentication of its own and should **never** be
   exposed directly — only the web UI talks to it, over the internal Docker
   network.

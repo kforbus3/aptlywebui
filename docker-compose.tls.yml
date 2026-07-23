@@ -1,0 +1,42 @@
+# TLS front — adds a Caddy reverse proxy that terminates HTTPS (with automatic
+# Let's Encrypt certificates) for the management UI and the apt repo server.
+#
+# Usage:
+#   1. In .env set WEBUI_DOMAIN and REPO_DOMAIN (two DNS names pointing here).
+#   2. docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+#
+# Caddy takes over host ports 80 and 443, so the plain-HTTP ports the base stack
+# publishes are cleared here (!reset). The services still listen on the internal
+# network, where Caddy reaches them by name.
+
+services:
+  webui:
+    ports: !reset []
+
+  repo:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: aptly-caddy
+    restart: unless-stopped
+    depends_on:
+      - webui
+      - repo
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      - WEBUI_DOMAIN=${WEBUI_DOMAIN:?set WEBUI_DOMAIN in your .env (e.g. aptly.example.com)}
+      - REPO_DOMAIN=${REPO_DOMAIN:?set REPO_DOMAIN in your .env (e.g. repo.example.com)}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Persist issued certificates so restarts don't re-request them (and hit
+      # Let's Encrypt rate limits).
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

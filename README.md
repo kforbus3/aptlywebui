@@ -40,7 +40,8 @@ minimal, no-UI, drop-files-and-publish server instead? See the companion
   - **Backup & restore** — one-click snapshots of aptly state + the UI database.
 - **Manages _and_ serves** — a bundled repo server (nginx) publishes your signed
   repositories and signing key over HTTP so `apt` clients can install straight
-  away. One `docker compose up`, nothing else to wire.
+  away. One `docker compose up`, nothing else to wire. An optional Caddy overlay
+  adds **HTTPS with automatic Let's Encrypt certificates**.
 - **Lightweight by design** — FastAPI + SQLite, no Postgres/Redis required.
 - **Single sign-on session** — JWT auth with automatic token refresh; the signing
   secret persists across restarts so sessions survive redeploys.
@@ -96,6 +97,17 @@ That's it — the compose stack runs the web UI (management, **:8000**), a paire
 aptly API service, and a repo server (**:80**) that serves your published
 repositories to `apt` clients. To serve on a different host port (e.g. if 80 is
 taken), set `REPO_HTTP_PORT` in `.env`.
+
+**Want HTTPS?** Point two DNS names at the host, set `WEBUI_DOMAIN` and
+`REPO_DOMAIN` in `.env`, and add the TLS overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+```
+
+A bundled Caddy front terminates TLS for both the UI and the repo with automatic
+Let's Encrypt certificates (redirecting HTTP→HTTPS). See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#tls-https-with-automatic-certificates).
 
 ## First workflow
 
