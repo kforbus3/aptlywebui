@@ -89,7 +89,7 @@ export default function Repos() {
       </Card>
       {showCreate && <CreateRepo onClose={() => setShowCreate(false)} />}
       {uploadTo && <UploadDeb repo={uploadTo} onClose={() => setUploadTo(null)} />}
-      {viewPackages && <ViewPackages repo={viewPackages} onClose={() => setViewPackages(null)} />}
+      {viewPackages && <ViewPackages repo={viewPackages} canEdit={canEdit} onClose={() => setViewPackages(null)} />}
     </div>
   );
 }
@@ -198,12 +198,34 @@ function UploadDeb({ repo, onClose }: { repo: string; onClose: () => void }) {
   );
 }
 
-function ViewPackages({ repo, onClose }: { repo: string; onClose: () => void }) {
+// Package keys look like "Pamd64 name version hash"; show a readable label.
+function packageLabel(key: string): string {
+  const parts = key.split(/\s+/);
+  if (parts.length >= 3 && parts[0].startsWith("P")) {
+    return `${parts[1]} ${parts[2]} (${parts[0].slice(1)})`;
+  }
+  return key;
+}
+
+function ViewPackages({ repo, canEdit, onClose }: { repo: string; canEdit: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
   const [filter, setFilter] = useState("");
   const { data, isLoading } = useQuery({
     queryKey: ["repo-packages", repo],
     queryFn: async () => (await api.get<string[]>(`/repos/${repo}/packages`)).data,
   });
+
+  const remove = useMutation({
+    mutationFn: (ref: string) =>
+      api.delete(`/repos/${repo}/packages`, { data: { PackageRefs: [ref] } }),
+    onSuccess: () => {
+      toast.success("Package removed");
+      qc.invalidateQueries({ queryKey: ["repo-packages", repo] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
   const filtered = (data || []).filter((p) => p.toLowerCase().includes(filter.toLowerCase()));
 
   return (
@@ -217,8 +239,24 @@ function ViewPackages({ repo, onClose }: { repo: string; onClose: () => void }) 
         ) : (
           <>
             <p className="text-xs text-slate-500">{filtered.length} package(s)</p>
+            {canEdit && (
+              <p className="text-xs text-slate-500">
+                Removing a package takes effect after re-snapshotting and re-publishing.
+              </p>
+            )}
             <ul className="space-y-1 font-mono text-xs text-slate-300">
-              {filtered.map((p) => <li key={p} className="rounded bg-slate-950 px-2 py-1">{p}</li>)}
+              {filtered.map((p) => (
+                <li key={p} className="flex items-center justify-between gap-2 rounded bg-slate-950 px-2 py-1">
+                  <span className="truncate" title={p}>{packageLabel(p)}</span>
+                  {canEdit && (
+                    <Button size="sm" variant="ghost"
+                      loading={remove.isPending && remove.variables === p}
+                      onClick={() => { if (confirm(`Remove ${packageLabel(p)} from ${repo}?`)) remove.mutate(p); }}>
+                      <Trash2 size={13} className="text-red-400" />
+                    </Button>
+                  )}
+                </li>
+              ))}
             </ul>
           </>
         )}

@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Key, Plus, Trash2 } from "lucide-react";
+import { Key, Plus, Trash2, Sparkles } from "lucide-react";
 import { api, apiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useToast } from "../components/Toast";
 import {
-  Button, Card, Label, Modal, Table, Spinner, EmptyState, PageHeader,
+  Button, Card, Input, Label, Modal, Table, Spinner, EmptyState, PageHeader,
 } from "../components/ui";
 
 interface GpgKey {
@@ -21,6 +21,7 @@ export default function Gpg() {
   const { hasRole } = useAuth();
   const canEdit = hasRole("operator");
   const [showImport, setShowImport] = useState(false);
+  const [showGenerate, setShowGenerate] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["gpg-keys"],
@@ -43,9 +44,14 @@ export default function Gpg() {
         subtitle="Signing keys for published repositories"
         actions={
           canEdit && (
-            <Button onClick={() => setShowImport(true)}>
-              <Plus size={15} /> Import Key
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setShowGenerate(true)}>
+                <Sparkles size={15} /> Generate Key
+              </Button>
+              <Button onClick={() => setShowImport(true)}>
+                <Plus size={15} /> Import Key
+              </Button>
+            </div>
           )
         }
       />
@@ -77,7 +83,54 @@ export default function Gpg() {
         )}
       </Card>
       {showImport && <ImportKey onClose={() => setShowImport(false)} />}
+      {showGenerate && <GenerateKey onClose={() => setShowGenerate(false)} />}
     </div>
+  );
+}
+
+function GenerateKey({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [name, setName] = useState("Aptly Repository");
+  const [email, setEmail] = useState("");
+
+  const generate = useMutation({
+    mutationFn: () => api.post("/gpg/keys/generate", { name, email, key_length: 4096 }),
+    onSuccess: () => {
+      toast.success("Signing key generated");
+      qc.invalidateQueries({ queryKey: ["gpg-keys"] });
+      onClose();
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Generate Signing Key"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button loading={generate.isPending} onClick={() => generate.mutate()} disabled={!emailOk}>
+            Generate
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-slate-400">
+          Creates a new 4096-bit RSA key in the signing keyring so you can publish signed
+          repositories. Export the public half from the published <span className="font-mono text-slate-300">/gpg</span> path
+          for apt clients.
+        </p>
+        <div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Aptly Repository" /></div>
+        <div><Label>Email</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="repo@example.com" /></div>
+        {generate.isPending && <p className="text-xs text-slate-500">Generating key — this can take a few seconds…</p>}
+      </div>
+    </Modal>
   );
 }
 

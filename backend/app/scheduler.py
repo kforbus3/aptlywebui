@@ -14,7 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
 from app import audit
-from app.aptly import AptlyClient, AptlyError, _clean_prefix
+from app.aptly import TASK_FAILED, AptlyClient, AptlyError, _clean_prefix
 from app.db import SessionLocal
 from app.models import Schedule
 
@@ -51,7 +51,16 @@ async def run_schedule(schedule_id: int) -> None:
         aptly = AptlyClient()
         status, detail = "success", ""
         try:
-            await aptly.update_mirror_packages(sched.mirror)
+            # Trigger the async mirror update and wait for the aptly task to
+            # finish before snapshotting — the snapshot must see the completed
+            # download.
+            task = await aptly.update_mirror_packages(sched.mirror)
+            task_id = task.get("ID")
+            final = await aptly.wait_for_task(task_id)
+            if final.get("State") == TASK_FAILED:
+                output = await aptly.get_task_output(task_id)
+                raise AptlyError(f"mirror update failed: {output.strip()[:200]}")
+            await aptly.delete_task(task_id)
             if sched.publish_prefix and sched.publish_distribution:
                 stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
                 snap_name = f"{sched.mirror}-{stamp}"

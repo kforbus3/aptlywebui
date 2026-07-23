@@ -8,15 +8,22 @@ signing.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import subprocess
 import tempfile
+import time
 from typing import Any
 
 import httpx
 
 from app.config import settings
+
+# aptly task states (api/task package).
+TASK_SUCCEEDED = 2
+TASK_FAILED = 3
+_TASK_TERMINAL = (TASK_SUCCEEDED, TASK_FAILED)
 
 
 class AptlyError(Exception):
@@ -101,14 +108,14 @@ class AptlyClient:
         await self._request("DELETE", f"/mirrors/{name}", params={"force": "1" if force else "0"})
         return {"message": "Mirror deleted"}
 
-    async def update_mirror_packages(self, name: str, data: dict | None = None):
-        # Download/refresh mirror packages via PUT /mirrors/:name. There is no
-        # POST /mirrors/:name/update route (the previous code 404'd on every
-        # sync). Runs synchronously — the scheduler snapshots the mirror right
-        # afterwards and needs the download finished — with a long timeout,
-        # since a full mirror sync easily exceeds the default 120s.
+    async def update_mirror_packages(self, name: str, data: dict | None = None) -> dict:
+        # Download/refresh mirror packages via PUT /mirrors/:name (there is no
+        # POST /mirrors/:name/update route). Runs as an aptly background task
+        # (?_async=1) and returns the task immediately, so a long sync never
+        # blocks the HTTP request; callers poll the task via wait_for_task or
+        # the /tasks endpoints.
         return await self._request(
-            "PUT", f"/mirrors/{name}", json=data or {}, timeout=3600
+            "PUT", f"/mirrors/{name}", params={"_async": "1"}, json=data or {}
         )
 
     async def list_mirror_packages(self, name: str):
@@ -130,6 +137,12 @@ class AptlyClient:
 
     async def list_repo_packages(self, name: str):
         return await self._request("GET", f"/repos/{name}/packages")
+
+    async def remove_repo_packages(self, name: str, refs: list[str]):
+        # aptly removes packages by reference key via DELETE /repos/:name/packages
+        # with body {"PackageRefs": [...]}. The repo must be re-snapshotted and
+        # re-published for the removal to reach apt clients.
+        return await self._request("DELETE", f"/repos/{name}/packages", json={"PackageRefs": refs})
 
     # --- Snapshots ---
     async def list_snapshots(self):
@@ -191,6 +204,31 @@ class AptlyClient:
     async def get_task(self, task_id: str):
         return await self._request("GET", f"/tasks/{task_id}")
 
+    async def get_task_output(self, task_id: str) -> str:
+        out = await self._request("GET", f"/tasks/{task_id}/output")
+        return out if isinstance(out, str) else out.decode("utf-8", "replace")
+
+    async def delete_task(self, task_id: str):
+        return await self._request("DELETE", f"/tasks/{task_id}")
+
+    async def wait_for_task(
+        self, task_id: str, poll_interval: float = 2.0, timeout: float = 3600.0
+    ) -> dict:
+        """Poll a task until it reaches a terminal state (succeeded/failed).
+
+        Polling short requests is more robust than blocking on aptly's
+        /tasks/:id/wait for the full duration of a large sync (which can trip
+        reverse-proxy read timeouts). Returns the final task object.
+        """
+        deadline = time.monotonic() + timeout if timeout else None
+        while True:
+            task = await self.get_task(task_id)
+            if task.get("State") in _TASK_TERMINAL:
+                return task
+            if deadline and time.monotonic() > deadline:
+                raise AptlyError(f"Timed out waiting for aptly task {task_id}", 504)
+            await asyncio.sleep(poll_interval)
+
     # --- Files ---
     async def upload_files(self, files: list[tuple[str, bytes, str]], temp_dir: str | None = None):
         temp_dir = _sanitize_dir(temp_dir) or "upload"
@@ -249,6 +287,40 @@ class GPGManager:
                 "display": f"{k.get('name') or 'Unknown'} ({short_id})",
             })
         return result
+
+    def generate_key(self, name: str, email: str, key_length: int = 4096) -> dict[str, Any]:
+        # Generate an unprotected RSA signing key in the keyring so aptly can
+        # sign publications non-interactively. %no-protection is required: aptly
+        # signs in batch mode and cannot supply a passphrase.
+        name = name.strip() or "Aptly Repository"
+        email = email.strip()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            raise ValueError("A valid email address is required")
+        if key_length not in (2048, 4096):
+            key_length = 4096
+        batch = (
+            "Key-Type: RSA\n"
+            f"Key-Length: {key_length}\n"
+            f"Name-Real: {name}\n"
+            f"Name-Email: {email}\n"
+            "Expire-Date: 0\n"
+            "%no-protection\n"
+            "%commit\n"
+        )
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".batch") as tmp:
+            tmp.write(batch)
+            tmp_path = tmp.name
+        try:
+            proc = subprocess.run(
+                ["gpg", "--batch", "--generate-key", tmp_path],
+                capture_output=True, text=True, timeout=180,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(proc.stderr or "Key generation failed")
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        return {"generated": email, "keys": self.list_keys()}
 
     def import_key(self, file_content: bytes, filename: str) -> dict[str, Any]:
         suffix = os.path.splitext(filename)[1] or ".asc"

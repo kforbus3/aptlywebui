@@ -106,6 +106,23 @@ export default function Schedules() {
   );
 }
 
+const CRON_PRESETS: { label: string; value: string }[] = [
+  { label: "Every hour", value: "0 * * * *" },
+  { label: "Every 6 hours", value: "0 */6 * * *" },
+  { label: "Daily at 03:00", value: "0 3 * * *" },
+  { label: "Weekly (Sun 03:00)", value: "0 3 * * 0" },
+  { label: "Monthly (1st, 03:00)", value: "0 3 1 * *" },
+];
+
+// aptly reports the root prefix as "." or ""; the UI/back end use "_empty_".
+function pubPrefix(p: { Prefix: string }) {
+  return p.Prefix && p.Prefix !== "." ? p.Prefix : "_empty_";
+}
+function pubLabel(p: { Prefix: string; Distribution: string }) {
+  const pfx = p.Prefix && p.Prefix !== "." ? p.Prefix : "(root)";
+  return `${pfx} / ${p.Distribution}`;
+}
+
 function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -113,26 +130,37 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
   const [mirror, setMirror] = useState(schedule?.mirror || "");
   const [cron, setCron] = useState(schedule?.cron || "");
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
-  const [prefix, setPrefix] = useState(schedule?.publish_prefix || "");
-  const [distribution, setDistribution] = useState(schedule?.publish_distribution || "");
+  const [republish, setRepublish] = useState(
+    !!(schedule?.publish_prefix && schedule?.publish_distribution)
+  );
+  // Encodes the selected publication as "<prefix>\n<distribution>".
+  const [target, setTarget] = useState(
+    schedule?.publish_prefix && schedule?.publish_distribution
+      ? `${schedule.publish_prefix}\n${schedule.publish_distribution}`
+      : ""
+  );
 
   const mirrors = useQuery({
     queryKey: ["mirrors"],
     queryFn: async () => (await api.get<{ Name: string }[]>("/mirrors")).data,
   });
+  const publications = useQuery({
+    queryKey: ["publish"],
+    queryFn: async () => (await api.get<{ Prefix: string; Distribution: string }[]>("/publish")).data,
+  });
 
   const save = useMutation({
     mutationFn: () => {
-      // Send empty strings (not undefined) so clearing a field actually clears
-      // it: JSON.stringify drops undefined, and the PATCH uses exclude_unset,
-      // which would otherwise keep the old publish target.
+      const [tPrefix, tDist] = republish && target ? target.split("\n") : ["", ""];
+      // Send empty strings (not undefined) so clearing the publish target
+      // actually clears it (the PATCH uses exclude_unset).
       const body = {
         name,
         mirror,
         cron,
         enabled,
-        publish_prefix: prefix,
-        publish_distribution: distribution,
+        publish_prefix: tPrefix,
+        publish_distribution: tDist,
       };
       return schedule ? api.patch(`/schedules/${schedule.id}`, body) : api.post("/schedules", body);
     },
@@ -144,6 +172,8 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
     onError: (e) => toast.error(apiError(e)),
   });
 
+  const missingTarget = republish && !target;
+
   return (
     <Modal
       open
@@ -152,7 +182,7 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={save.isPending} onClick={() => save.mutate()} disabled={!name || !mirror || !cron}>
+          <Button loading={save.isPending} onClick={() => save.mutate()} disabled={!name || !mirror || !cron || missingTarget}>
             {schedule ? "Save" : "Create"}
           </Button>
         </>
@@ -167,13 +197,42 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
             {(mirrors.data || []).map((m) => <option key={m.Name} value={m.Name}>{m.Name}</option>)}
           </Select>
         </div>
-        <div><Label>Cron</Label><Input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 3 * * *" /></div>
+        <div>
+          <Label>Schedule (cron)</Label>
+          <div className="flex gap-2">
+            <Input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 3 * * *" className="flex-1" />
+            <Select value="" onChange={(e) => e.target.value && setCron(e.target.value)} className="w-40">
+              <option value="">Presets…</option>
+              {CRON_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </Select>
+          </div>
+        </div>
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           Enabled
         </label>
-        <div><Label>Publish Prefix (optional)</Label><Input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="_empty_" /></div>
-        <div><Label>Publish Distribution (optional)</Label><Input value={distribution} onChange={(e) => setDistribution(e.target.value)} placeholder="bookworm" /></div>
+
+        <div className="rounded-lg border border-slate-800 p-3">
+          <label className="flex items-center gap-2 text-sm text-slate-200">
+            <input type="checkbox" checked={republish} onChange={(e) => setRepublish(e.target.checked)} />
+            Snapshot &amp; re-publish after each sync
+          </label>
+          {republish && (
+            <div className="mt-3">
+              <Label>Published target to switch</Label>
+              <Select value={target} onChange={(e) => setTarget(e.target.value)}>
+                <option value="">Select a publication…</option>
+                {(publications.data || []).map((p) => (
+                  <option key={pubLabel(p)} value={`${pubPrefix(p)}\n${p.Distribution}`}>{pubLabel(p)}</option>
+                ))}
+              </Select>
+              <p className="mt-2 text-xs text-slate-500">
+                Each run creates a timestamped snapshot from the mirror and switches this
+                published distribution to it. Leave unchecked to only refresh the mirror.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </Modal>
   );

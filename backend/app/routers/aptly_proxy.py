@@ -116,6 +116,19 @@ async def delete_repo(
     return result
 
 
+@router.delete("/repos/{name}/packages")
+async def remove_repo_packages(
+    name: str, data: dict[str, Any] = Body(...),
+    aptly: AptlyClient = Depends(get_aptly),
+    user: User = Depends(require_operator), db: AsyncSession = Depends(get_db),
+):
+    refs = data.get("PackageRefs") or []
+    result = await aptly.remove_repo_packages(name, refs)
+    await audit.record(db, username=user.username, action="remove_packages", resource=name,
+                       method="DELETE", detail=f"{len(refs)} package ref(s)")
+    return result
+
+
 @router.post("/repos/{name}/upload")
 async def upload_to_repo(
     name: str,
@@ -256,6 +269,16 @@ async def list_tasks(aptly: AptlyClient = Depends(get_aptly), _: User = Depends(
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str, aptly: AptlyClient = Depends(get_aptly), _: User = Depends(require_viewer)):
     return await aptly.get_task(task_id)
+
+
+@router.get("/tasks/{task_id}/output")
+async def task_output(task_id: str, aptly: AptlyClient = Depends(get_aptly), _: User = Depends(require_viewer)):
+    return {"output": await aptly.get_task_output(task_id)}
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(task_id: str, aptly: AptlyClient = Depends(get_aptly), _: User = Depends(require_operator)):
+    return await aptly.delete_task(task_id)
 
 
 @router.get("/graph")

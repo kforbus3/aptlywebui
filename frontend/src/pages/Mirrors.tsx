@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Database, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api, apiError } from "../lib/api";
@@ -33,15 +33,6 @@ export default function Mirrors() {
   const { data, isLoading } = useQuery({
     queryKey: ["mirrors"],
     queryFn: async () => (await api.get<Mirror[]>("/mirrors")).data,
-  });
-
-  const sync = useMutation({
-    mutationFn: (name: string) => api.post(`/mirrors/${name}/update`, {}),
-    onSuccess: () => {
-      toast.success("Mirror update started");
-      qc.invalidateQueries({ queryKey: ["mirrors"] });
-    },
-    onError: (e) => toast.error(apiError(e)),
   });
 
   const remove = useMutation({
@@ -82,10 +73,7 @@ export default function Mirrors() {
                 <td className="px-4 py-3">
                   {canEdit && (
                     <div className="flex justify-end gap-1">
-                      <Button size="sm" variant="secondary" loading={sync.isPending && sync.variables === m.Name}
-                        onClick={() => sync.mutate(m.Name)}>
-                        <RefreshCw size={13} /> Sync
-                      </Button>
+                      <SyncButton mirror={m.Name} />
                       <Button size="sm" variant="ghost"
                         onClick={() => { if (confirm(`Delete mirror "${m.Name}"?`)) remove.mutate(m.Name); }}>
                         <Trash2 size={14} className="text-red-400" />
@@ -100,6 +88,63 @@ export default function Mirrors() {
       </Card>
       {showCreate && <CreateMirror onClose={() => setShowCreate(false)} />}
     </div>
+  );
+}
+
+// Triggers an async aptly mirror update and polls the resulting task to
+// completion, so a long sync never blocks the request or the UI.
+function SyncButton({ mirror }: { mirror: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [taskId, setTaskId] = useState<number | null>(null);
+
+  const start = useMutation({
+    mutationFn: () => api.post(`/mirrors/${mirror}/update`, {}),
+    onSuccess: (res) => {
+      const id = (res.data as any)?.ID;
+      if (id != null) {
+        setTaskId(id);
+        qc.invalidateQueries({ queryKey: ["tasks"] });
+      } else {
+        toast.success(`${mirror} synced`);
+      }
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const task = useQuery({
+    queryKey: ["task", taskId],
+    queryFn: async () => (await api.get(`/tasks/${taskId}`)).data as any,
+    enabled: taskId != null,
+    refetchInterval: (q) => {
+      const s = (q.state.data as any)?.State;
+      return s === 2 || s === 3 ? false : 1500;
+    },
+  });
+
+  const state = (task.data as any)?.State;
+  useEffect(() => {
+    if (state !== 2 && state !== 3) return;
+    if (state === 2) {
+      toast.success(`${mirror} synced`);
+      qc.invalidateQueries({ queryKey: ["mirrors"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      setTaskId(null);
+    } else {
+      // Failed — surface aptly's task output as the error detail.
+      api.get(`/tasks/${taskId}/output`)
+        .then((r) => toast.error(`${mirror} sync failed: ${((r.data as any)?.output || "").trim().slice(-300) || "unknown error"}`))
+        .catch(() => toast.error(`${mirror} sync failed`))
+        .finally(() => setTaskId(null));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  const busy = start.isPending || taskId != null;
+  return (
+    <Button size="sm" variant="secondary" loading={busy} onClick={() => start.mutate()}>
+      <RefreshCw size={13} /> {busy ? "Syncing…" : "Sync"}
+    </Button>
   );
 }
 
