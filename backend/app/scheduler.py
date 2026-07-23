@@ -14,7 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
 from app import audit
-from app.aptly import AptlyClient, AptlyError
+from app.aptly import TASK_FAILED, AptlyClient, AptlyError, _clean_prefix
 from app.db import SessionLocal
 from app.models import Schedule
 
@@ -23,6 +23,23 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 
 def _job_id(schedule_id: int) -> str:
     return f"schedule-{schedule_id}"
+
+
+async def _publish_components(aptly: AptlyClient, prefix: str, distribution: str) -> list[str]:
+    """Return the component names of an existing publication, defaulting to
+    ["main"] if it can't be resolved."""
+    want_prefix = _clean_prefix(prefix)
+    try:
+        for pub in await aptly.list_publish():
+            if pub.get("Distribution") != distribution:
+                continue
+            if _clean_prefix(pub.get("Prefix", "")) != want_prefix:
+                continue
+            comps = [s.get("Component", "main") for s in (pub.get("Sources") or [])]
+            return comps or ["main"]
+    except AptlyError:
+        pass
+    return ["main"]
 
 
 async def run_schedule(schedule_id: int) -> None:
@@ -34,15 +51,29 @@ async def run_schedule(schedule_id: int) -> None:
         aptly = AptlyClient()
         status, detail = "success", ""
         try:
-            await aptly.update_mirror_packages(sched.mirror)
+            # Trigger the async mirror update and wait for the aptly task to
+            # finish before snapshotting — the snapshot must see the completed
+            # download.
+            task = await aptly.update_mirror_packages(sched.mirror)
+            task_id = task.get("ID")
+            final = await aptly.wait_for_task(task_id)
+            if final.get("State") == TASK_FAILED:
+                output = await aptly.get_task_output(task_id)
+                raise AptlyError(f"mirror update failed: {output.strip()[:200]}")
+            await aptly.delete_task(task_id)
             if sched.publish_prefix and sched.publish_distribution:
                 stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
                 snap_name = f"{sched.mirror}-{stamp}"
                 await aptly.create_snapshot_from_mirror(sched.mirror, {"Name": snap_name})
+                # Switch every component the target publishes, not just "main",
+                # so non-main / multi-component publications republish correctly.
+                components = await _publish_components(
+                    aptly, sched.publish_prefix, sched.publish_distribution
+                )
                 await aptly.update_publish(
                     sched.publish_prefix,
                     sched.publish_distribution,
-                    {"Snapshots": [{"Component": "main", "Name": snap_name}]},
+                    {"Snapshots": [{"Component": c, "Name": snap_name} for c in components]},
                 )
                 detail = f"updated mirror and republished {sched.publish_prefix}/{sched.publish_distribution}"
             else:

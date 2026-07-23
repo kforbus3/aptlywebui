@@ -18,7 +18,7 @@ const NAV = [
   { to: "/packages", label: "Packages", icon: Search, role: "viewer" },
   { to: "/gpg", label: "GPG Keys", icon: KeyRound, role: "viewer" },
   { to: "/schedules", label: "Schedules", icon: CalendarClock, role: "viewer" },
-  { to: "/backups", label: "Backups", icon: Archive, role: "operator" },
+  { to: "/backups", label: "Backups", icon: Archive, role: "admin" },
   { to: "/users", label: "Users", icon: Users, role: "admin" },
   { to: "/audit", label: "Audit Log", icon: ScrollText, role: "admin" },
 ] as const;

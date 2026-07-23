@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -15,9 +16,34 @@ from app.models import User
 router = APIRouter(prefix="/gpg", tags=["gpg"])
 
 
+class GenerateKeyRequest(BaseModel):
+    name: str = "Aptly Repository"
+    email: str
+    key_length: int = 4096
+
+
 @router.get("/keys")
 async def list_keys(_: User = Depends(require_viewer)):
     return await run_in_threadpool(gpg_manager.list_keys)
+
+
+@router.post("/keys/generate")
+async def generate_key(
+    body: GenerateKeyRequest,
+    user: User = Depends(require_operator),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        result = await run_in_threadpool(
+            gpg_manager.generate_key, body.name, body.email, body.key_length
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Key generation failed: {exc}") from exc
+    await audit.record(db, username=user.username, action="generate_gpg_key",
+                       resource=body.email, method="POST")
+    return result
 
 
 @router.post("/keys")

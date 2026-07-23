@@ -60,6 +60,10 @@ async def update_user(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     if body.role is not None:
         _validate_role(body.role)
+        # Demoting the last active admin out of the admin role would lock
+        # everyone out of user/audit management just like deactivating them.
+        if user.role == "admin" and body.role != "admin":
+            await _guard_last_admin(db, user)
         user.role = body.role
     if body.email is not None:
         user.email = body.email

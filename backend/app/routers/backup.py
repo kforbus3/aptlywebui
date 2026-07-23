@@ -20,7 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from app import audit
 from app.config import settings
 from app.db import get_db
-from app.deps import require_admin, require_operator
+from app.deps import require_admin
 from app.models import User
 
 router = APIRouter(prefix="/backup", tags=["backup"])
@@ -71,21 +71,26 @@ def _restore_archive(path: str) -> None:
     parent = os.path.dirname(settings.aptly_root_dir.rstrip("/")) or "/"
     with tarfile.open(path, "r:gz") as tar:
         members = [m for m in tar.getmembers() if m.name.startswith("aptly/")]
-        # Guard against path traversal in archive members.
+        # Guard against path traversal and link escapes in archive members.
+        # The name check alone misses symlinks/hardlinks whose *name* is inside
+        # aptly/ but whose target points outside it.
         for m in members:
+            if m.issym() or m.islnk():
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Archive contains links; refusing to extract")
             target = os.path.realpath(os.path.join(parent, m.name))
             if not target.startswith(os.path.realpath(parent) + os.sep):
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsafe archive member")
-        tar.extractall(parent, members=members)
+        # filter="data" (Python 3.12+) also rejects absolute paths, .. and links.
+        tar.extractall(parent, members=members, filter="data")
 
 
 @router.get("")
-async def list_backups(_: User = Depends(require_operator)):
+async def list_backups(_: User = Depends(require_admin)):
     return await run_in_threadpool(_list_archives)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_backup(user: User = Depends(require_operator), db: AsyncSession = Depends(get_db)):
+async def create_backup(user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     meta = await run_in_threadpool(_create_archive)
     await audit.record(db, username=user.username, action="create_backup",
                        resource=meta["name"], method="POST")
@@ -93,7 +98,7 @@ async def create_backup(user: User = Depends(require_operator), db: AsyncSession
 
 
 @router.get("/{name}/download")
-async def download_backup(name: str, _: User = Depends(require_operator)):
+async def download_backup(name: str, _: User = Depends(require_admin)):
     path = _safe_path(name)
     if not os.path.exists(path):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Backup not found")

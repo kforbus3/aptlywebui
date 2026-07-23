@@ -49,10 +49,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Aptly Web UI", version=__version__, lifespan=lifespan)
 
+# A wildcard origin combined with allow_credentials=True is rejected by
+# browsers per the CORS spec. Auth uses Bearer tokens (not cookies), so
+# credentials aren't needed when the origin list is the "*" wildcard.
+_cors_origins = settings.cors_origin_list
+_allow_wildcard = _cors_origins == ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=not _allow_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -75,13 +80,20 @@ if os.path.isdir(_assets_dir):
     app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
 
 
+_STATIC_ROOT = os.path.realpath(STATIC_DIR)
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
 async def spa(full_path: str):
     """Serve the SPA, falling back to index.html for client-side routes."""
     if full_path.startswith("api/"):
         return JSONResponse(status_code=404, content={"detail": "Not found"})
-    candidate = os.path.join(STATIC_DIR, full_path)
-    if full_path and os.path.isfile(candidate):
+    # Resolve the requested path and confirm it stays within STATIC_DIR before
+    # serving. Percent-encoded traversal (e.g. %2e%2e%2f) reaches here decoded
+    # and would otherwise expose the SQLite DB, GPG keys, and aptly data.
+    candidate = os.path.realpath(os.path.join(_STATIC_ROOT, full_path))
+    within_root = candidate == _STATIC_ROOT or candidate.startswith(_STATIC_ROOT + os.sep)
+    if full_path and within_root and os.path.isfile(candidate):
         return FileResponse(candidate)
     index = os.path.join(STATIC_DIR, "index.html")
     if os.path.isfile(index):
