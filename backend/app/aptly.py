@@ -350,5 +350,41 @@ class GPGManager:
                 raise RuntimeError(proc.stderr or "Delete failed")
         return {"deleted": fingerprint, "keys": self.list_keys()}
 
+    def export_public_keys(self, dest_path: str) -> bool:
+        """Export the armored public half of every signing key to ``dest_path``
+        so apt clients can import it (the bundled nginx serves it at
+        /gpg/public.key). Concatenating all keys means whichever one signed a
+        given publication, the client has it. Returns True if a file was written.
+        """
+        if not dest_path:
+            return False
+        parent = os.path.dirname(dest_path) or "."
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError:
+            return False
+        fingerprints = [k["fingerprint"] for k in self.list_keys() if k.get("fingerprint")]
+        if not fingerprints:
+            # No signing keys left — drop any stale export so clients don't pin
+            # to a key that no longer exists.
+            if os.path.exists(dest_path):
+                try:
+                    os.unlink(dest_path)
+                except OSError:
+                    pass
+            return False
+        proc = subprocess.run(
+            ["gpg", "--batch", "--yes", "--armor", "--export", *fingerprints],
+            capture_output=True, timeout=30,
+        )
+        if proc.returncode != 0 or not proc.stdout:
+            return False
+        tmp_path = f"{dest_path}.tmp"
+        with open(tmp_path, "wb") as fh:
+            fh.write(proc.stdout)
+        os.replace(tmp_path, dest_path)
+        os.chmod(dest_path, 0o644)
+        return True
+
 
 gpg_manager = GPGManager()

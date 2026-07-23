@@ -40,6 +40,15 @@ async def lifespan(app: FastAPI):
     await seed_admin()
     start()
     await load_jobs()
+    # Publish the signing public key for apt clients (served by nginx at
+    # /gpg/public.key) so an existing key is available after a restart.
+    try:
+        from starlette.concurrency import run_in_threadpool
+
+        from app.aptly import gpg_manager
+        await run_in_threadpool(gpg_manager.export_public_keys, settings.public_key_path)
+    except Exception:  # noqa: BLE001 — never block startup on key export
+        logger.warning("Could not export signing public key", exc_info=True)
     logger.info("Aptly Web UI %s started (aptly API: %s)", __version__, settings.aptly_api_url)
     try:
         yield

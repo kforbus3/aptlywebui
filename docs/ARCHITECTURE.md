@@ -13,6 +13,7 @@ polished SPA.
 | UI database | SQLite (async SQLAlchemy) | Users, audit log, schedules |
 | Scheduler | APScheduler (in-process) | Cron-based mirror updates / re-publishing |
 | Repository engine | aptly (`aptly api serve`) | The actual Debian repository operations |
+| Repo server | nginx | Serves published repositories and the signing public key to apt clients |
 
 ## Data flow
 
@@ -57,10 +58,12 @@ frontend/src/
   pages/         one page per feature area
 ```
 
-## Pairing with a serving layer
+## Serving layer
 
 `aptly api serve` exposes the management API and writes published repositories to
-`<rootDir>/public`. Serving those files to apt clients over HTTP(S) is a separate
-concern — front it with nginx (for example, the companion
-[`docker-aptly`](https://github.com/kforbus3/docker-aptly) project) or any web
-server pointed at the published directory.
+`<rootDir>/public`. The compose stack includes a `repo` service (nginx) that
+serves that directory — plus the signing public key the web UI exports to the
+`repo-keys` volume — to apt clients on `REPO_HTTP_PORT` (default 80). It mounts
+the aptly data read-only and exposes only the published subtree and
+`/gpg/public.key`, never aptly's database. For public deployments, front it with
+a TLS-terminating proxy.
