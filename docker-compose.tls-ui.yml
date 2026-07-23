@@ -1,0 +1,49 @@
+# LAN / internal-CA TLS front — serves ONLY the management UI over HTTPS (with a
+# certificate from Caddy's own local CA), while the repository stays on plain
+# HTTP. Use this when the host isn't reachable from the public internet, so
+# Let's Encrypt can't issue a certificate. (For a public host with real DNS, use
+# docker-compose.tls.yml instead, which fronts both services with automatic
+# Let's Encrypt certificates.)
+#
+# Usage:
+#   1. In .env set WEBUI_DOMAIN to the host's name, e.g.
+#        WEBUI_DOMAIN=repo.homenet.com
+#      (it must resolve to this host on your LAN — router DNS or /etc/hosts).
+#   2. docker compose -f docker-compose.yml -f docker-compose.tls-ui.yml up -d
+#   3. Trust Caddy's root CA on the devices you browse the UI from — see
+#      docs/DEPLOYMENT.md ("Trusting the internal CA").
+#
+# Result on the single hostname:
+#   https://<WEBUI_DOMAIN>/  -> management UI (Caddy, port 443)
+#   http://<WEBUI_DOMAIN>/   -> apt repository (nginx, base REPO_HTTP_PORT, default 80)
+
+services:
+  webui:
+    # Reached only through Caddy (and the internal network); no direct host port.
+    ports: !reset []
+
+  # The repo service is intentionally left as-is — it keeps serving plain HTTP on
+  # the base stack's REPO_HTTP_PORT (default 80).
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: aptly-caddy
+    restart: unless-stopped
+    depends_on:
+      - webui
+      - repo
+    ports:
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      - WEBUI_DOMAIN=${WEBUI_DOMAIN:?set WEBUI_DOMAIN in your .env (e.g. repo.homenet.com)}
+    volumes:
+      - ./caddy/Caddyfile.ui:/etc/caddy/Caddyfile:ro
+      # Persists the internal CA + issued cert so restarts reuse them (and you
+      # don't have to re-trust a new root CA).
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -98,16 +98,19 @@ aptly API service, and a repo server (**:80**) that serves your published
 repositories to `apt` clients. To serve on a different host port (e.g. if 80 is
 taken), set `REPO_HTTP_PORT` in `.env`.
 
-**Want HTTPS?** Point two DNS names at the host, set `WEBUI_DOMAIN` and
-`REPO_DOMAIN` in `.env`, and add the TLS overlay:
+**Want HTTPS?** A bundled Caddy front comes in two flavours:
 
 ```bash
+# Public host with real DNS — automatic Let's Encrypt for the UI and the repo:
 docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+
+# LAN / private host — HTTPS UI via Caddy's internal CA, repo stays HTTP:
+docker compose -f docker-compose.yml -f docker-compose.tls-ui.yml up -d
 ```
 
-A bundled Caddy front terminates TLS for both the UI and the repo with automatic
-Let's Encrypt certificates (redirecting HTTP→HTTPS). See
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#tls-https-with-automatic-certificates).
+Set `WEBUI_DOMAIN` (and `REPO_DOMAIN` for the public variant) in `.env` first.
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#tls-https) — including how to trust the
+internal CA in Firefox/Chrome for the LAN setup.
 
 ## First workflow
 

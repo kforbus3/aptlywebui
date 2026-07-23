@@ -1,0 +1,17 @@
+# UI-only TLS front using Caddy's internal CA.
+#
+# For LAN / private deployments where the host is NOT reachable from the public
+# internet (so Let's Encrypt can't validate a domain). Caddy serves the
+# management UI over HTTPS with a certificate issued by its own local CA — no
+# DNS, no ACME challenge, no internet required. The repository stays on plain
+# HTTP (apt's integrity comes from the GPG signature, not the transport).
+#
+# One hostname is enough: https://<host> → UI (here), http://<host> → repo.
+#
+# After first start, trust Caddy's root certificate on the devices you browse
+# the UI from — see docs/DEPLOYMENT.md ("Trusting the internal CA").
+
+{$WEBUI_DOMAIN} {
+	tls internal
+	reverse_proxy webui:8000
+}
