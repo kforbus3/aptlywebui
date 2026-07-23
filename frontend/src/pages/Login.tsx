@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Navigate } from "react-router-dom";
 import { Boxes } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { apiError } from "../lib/api";
@@ -15,7 +15,9 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
 
   const from = (location.state as any)?.from?.pathname || "/";
-  if (user) navigate(from, { replace: true });
+  // Already authenticated: redirect declaratively instead of calling navigate()
+  // during render (which warns and races the post-submit navigate).
+  if (user) return <Navigate to={from} replace />;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

@@ -85,6 +85,10 @@ async def run_now(
     sched = await db.get(Schedule, schedule_id)
     if not sched:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Schedule not found")
+    if not sched.enabled:
+        # run_schedule() no-ops for a disabled schedule; reject rather than
+        # falsely report success.
+        raise HTTPException(status.HTTP_409_CONFLICT, "Schedule is disabled; enable it before running")
     await audit.record(db, username=user.username, action="run_schedule", resource=sched.name, method="POST")
     await sched_mod.run_schedule(schedule_id)
     await db.refresh(sched)

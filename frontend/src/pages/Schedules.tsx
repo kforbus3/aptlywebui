@@ -123,13 +123,16 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
 
   const save = useMutation({
     mutationFn: () => {
+      // Send empty strings (not undefined) so clearing a field actually clears
+      // it: JSON.stringify drops undefined, and the PATCH uses exclude_unset,
+      // which would otherwise keep the old publish target.
       const body = {
         name,
         mirror,
         cron,
         enabled,
-        publish_prefix: prefix || undefined,
-        publish_distribution: distribution || undefined,
+        publish_prefix: prefix,
+        publish_distribution: distribution,
       };
       return schedule ? api.patch(`/schedules/${schedule.id}`, body) : api.post("/schedules", body);
     },

@@ -22,6 +22,12 @@ from app.security import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# A precomputed bcrypt hash of a dummy password. Verifying against it on the
+# user-not-found path keeps login timing constant, closing the username
+# enumeration oracle (an existing user's wrong password would otherwise take
+# markedly longer than a non-existent username).
+_DUMMY_HASH = get_password_hash("aptly-webui-timing-equalizer")
+
 
 def _tokens(user: User) -> TokenResponse:
     claims = {"role": user.role, "username": user.username}
@@ -37,7 +43,10 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ):
     user = await get_user_by_username(db, form.username)
-    if not user or not verify_password(form.password, user.hashed_password):
+    # Always run a bcrypt verify so response time doesn't reveal whether the
+    # username exists.
+    password_ok = verify_password(form.password, user.hashed_password if user else _DUMMY_HASH)
+    if not user or not password_ok:
         await audit.record(
             db, username=form.username, action="login", status="failure", detail="bad credentials"
         )

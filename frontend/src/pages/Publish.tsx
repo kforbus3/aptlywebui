@@ -21,8 +21,14 @@ interface Published {
   Storage: string;
 }
 
+// aptly represents the root prefix as either "" or "."; both map to the
+// backend's "_empty_" sentinel for use in request paths.
 function prefixOf(p: Published) {
-  return p.Prefix && p.Prefix !== "" ? p.Prefix : "_empty_";
+  return p.Prefix && p.Prefix !== "" && p.Prefix !== "." ? p.Prefix : "_empty_";
+}
+
+function displayPrefix(p: Published) {
+  return p.Prefix && p.Prefix !== "." ? p.Prefix : "(root)";
 }
 
 export default function Publish() {
@@ -70,7 +76,7 @@ export default function Publish() {
           <Table head={["Prefix", "Distribution", "Kind", "Sources", "Architectures", ""]}>
             {data.map((p) => (
               <tr key={`${p.Prefix}/${p.Distribution}`} className="hover:bg-slate-800/40">
-                <td className="px-4 py-3 font-mono text-slate-300">{p.Prefix || "(root)"}</td>
+                <td className="px-4 py-3 font-mono text-slate-300">{displayPrefix(p)}</td>
                 <td className="px-4 py-3"><Badge color="blue">{p.Distribution}</Badge></td>
                 <td className="px-4 py-3 text-slate-400">{p.SourceKind}</td>
                 <td className="px-4 py-3 text-slate-400">{p.Sources?.map((s) => s.Name).join(", ")}</td>
@@ -82,7 +88,7 @@ export default function Publish() {
                         <RefreshCw size={13} /> Switch
                       </Button>
                       <Button size="sm" variant="ghost"
-                        onClick={() => { if (confirm(`Unpublish "${p.Prefix || "(root)"}/${p.Distribution}"?`)) unpublish.mutate(p); }}>
+                        onClick={() => { if (confirm(`Unpublish "${displayPrefix(p)}/${p.Distribution}"?`)) unpublish.mutate(p); }}>
                         <Trash2 size={14} className="text-red-400" />
                       </Button>
                     </div>
@@ -111,8 +117,13 @@ function SwitchSnapshot({ target, onClose }: { target: Published; onClose: () =>
 
   const swap = useMutation({
     mutationFn: () =>
+      // Switch every component the target actually publishes to the new
+      // snapshot; hardcoding "main" errors on any non-main/multi-component
+      // publication.
       api.put(`/publish/${prefixOf(target)}/${target.Distribution}`, {
-        Snapshots: [{ Component: "main", Name: snapshot }],
+        Snapshots: (target.Sources?.length ? target.Sources : [{ Component: "main", Name: "" }]).map(
+          (s) => ({ Component: s.Component, Name: snapshot })
+        ),
       }),
     onSuccess: () => {
       toast.success("Snapshot switched");

@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api, tokens } from "./api";
 
 export interface CurrentUser {
@@ -25,6 +26,7 @@ const Ctx = createContext<AuthCtx>(null as any);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   async function refreshUser() {
     if (!tokens.access) {
@@ -53,12 +55,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
     tokens.set(data.access_token, data.refresh_token);
+    // Drop anything cached from a previous session before loading this user.
+    queryClient.clear();
     await refreshUser();
   }
 
   function logout() {
     tokens.clear();
     setUser(null);
+    queryClient.clear();
   }
 
   function hasRole(min: "viewer" | "operator" | "admin") {

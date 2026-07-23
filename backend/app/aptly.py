@@ -92,14 +92,24 @@ class AptlyClient:
         return await self._request("POST", "/mirrors", json=data)
 
     async def update_mirror(self, name: str, data: dict):
-        return await self._request("PUT", f"/mirrors/{name}", json=data)
+        # On aptly (verified against the bundled 1.5.0) the only mutating mirror
+        # route is PUT /mirrors/:name, which both applies config changes and
+        # refreshes packages. Allow a long timeout since it downloads.
+        return await self._request("PUT", f"/mirrors/{name}", json=data, timeout=3600)
 
     async def delete_mirror(self, name: str, force: bool = False):
         await self._request("DELETE", f"/mirrors/{name}", params={"force": "1" if force else "0"})
         return {"message": "Mirror deleted"}
 
     async def update_mirror_packages(self, name: str, data: dict | None = None):
-        return await self._request("POST", f"/mirrors/{name}/update", json=data or {})
+        # Download/refresh mirror packages via PUT /mirrors/:name. There is no
+        # POST /mirrors/:name/update route (the previous code 404'd on every
+        # sync). Runs synchronously — the scheduler snapshots the mirror right
+        # afterwards and needs the download finished — with a long timeout,
+        # since a full mirror sync easily exceeds the default 120s.
+        return await self._request(
+            "PUT", f"/mirrors/{name}", json=data or {}, timeout=3600
+        )
 
     async def list_mirror_packages(self, name: str):
         return await self._request("GET", f"/mirrors/{name}/packages")
@@ -157,14 +167,17 @@ class AptlyClient:
         return await self._request("POST", url, json=data)
 
     async def update_publish(self, prefix: str, distribution: str, data: dict):
-        prefix = _clean_prefix(prefix)
-        url = f"/publish/{prefix}/{distribution}" if prefix else f"/publish/{distribution}"
-        return await self._request("PUT", url, json=data)
+        # aptly's PUT route is always 3-segment /publish/:prefix/:distribution;
+        # the root prefix must be passed as ":." (a bare "." is ambiguous in a
+        # URL), never as an omitted segment.
+        prefix_seg = _clean_prefix(prefix) or ":."
+        return await self._request("PUT", f"/publish/{prefix_seg}/{distribution}", json=data)
 
     async def delete_publish(self, prefix: str, distribution: str, force: bool = False):
-        prefix = _clean_prefix(prefix)
-        url = f"/publish/{prefix}/{distribution}" if prefix else f"/publish/{distribution}"
-        await self._request("DELETE", url, params={"force": "1" if force else "0"})
+        prefix_seg = _clean_prefix(prefix) or ":."
+        await self._request(
+            "DELETE", f"/publish/{prefix_seg}/{distribution}", params={"force": "1" if force else "0"}
+        )
         return {"message": "Unpublished"}
 
     # --- Packages ---
