@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Database, FolderGit2, Camera, UploadCloud,
-  Search, KeyRound, CalendarClock, Users, ScrollText, Archive, LogOut, Boxes,
+  Search, KeyRound, CalendarClock, Users, ScrollText, Archive, LogOut, Boxes, RefreshCw,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
@@ -44,6 +44,17 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const roleColor = user?.role === "admin" ? "purple" : user?.role === "operator" ? "blue" : "slate";
 
+  // Global sync indicator: an in-progress mirror sync is visible from any page,
+  // not just the Mirrors view. Shares the ["tasks"] cache with the Mirrors page.
+  const { data: tasks } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: async () => (await api.get<any[]>("/tasks")).data,
+    refetchInterval: 5000,
+  });
+  const syncCount = (tasks || []).filter(
+    (t) => typeof t?.Name === "string" && t.Name.startsWith("Update mirror ") && (t.State === 0 || t.State === 1),
+  ).length;
+
   return (
     <div className="flex h-full">
       <aside className="flex w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900/40">
@@ -64,7 +75,16 @@ export default function Layout({ children }: { children: ReactNode }) {
               }
             >
               <n.icon size={17} />
-              {n.label}
+              <span className="flex-1">{n.label}</span>
+              {n.to === "/mirrors" && syncCount > 0 && (
+                <span
+                  title={`${syncCount} mirror sync${syncCount > 1 ? "s" : ""} in progress`}
+                  className="flex items-center gap-1 text-xs text-amber-300"
+                >
+                  <RefreshCw size={12} className="animate-spin" />
+                  {syncCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
