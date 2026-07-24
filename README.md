@@ -34,7 +34,9 @@ minimal, no-UI, drop-files-and-publish server instead? See the companion
   blocking on a long download.
 - **Publish snapshots _or_ local repos directly**, sign with one click, switch a
   published snapshot, or **refresh** a directly-published repo after
-  uploading/removing packages.
+  uploading/removing packages. Publishing runs as a background task with live
+  progress (no blocked UI on large repos), and an optional **Skip Contents index**
+  makes publishing big repos much faster and smaller.
 - **Generate _or_ import a signing key** right in the UI, so a fresh install can
   publish signed repositories with zero shell access.
 - **Built for IT ops & homelabs:**

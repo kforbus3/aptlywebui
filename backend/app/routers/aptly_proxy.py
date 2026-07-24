@@ -226,7 +226,9 @@ async def publish(
     aptly: AptlyClient = Depends(get_aptly),
     user: User = Depends(require_operator), db: AsyncSession = Depends(get_db),
 ):
-    result = await aptly.publish_snapshot(prefix, data)
+    # Run as a background aptly task so the request returns immediately with a
+    # task the UI polls; a large publish would otherwise exceed the HTTP timeout.
+    result = await aptly.publish_snapshot(prefix, data, async_=True)
     await audit.record(db, username=user.username, action="publish", resource=prefix, method="POST")
     return result
 
@@ -237,7 +239,7 @@ async def update_publish(
     aptly: AptlyClient = Depends(get_aptly),
     user: User = Depends(require_operator), db: AsyncSession = Depends(get_db),
 ):
-    result = await aptly.update_publish(prefix, distribution, data)
+    result = await aptly.update_publish(prefix, distribution, data, async_=True)
     await audit.record(db, username=user.username, action="switch_publish",
                        resource=f"{prefix}/{distribution}", method="PUT")
     return result

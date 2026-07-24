@@ -70,11 +70,18 @@ async def run_schedule(schedule_id: int) -> None:
                 components = await _publish_components(
                     aptly, sched.publish_prefix, sched.publish_distribution
                 )
-                await aptly.update_publish(
+                ptask = await aptly.update_publish(
                     sched.publish_prefix,
                     sched.publish_distribution,
                     {"Snapshots": [{"Component": c, "Name": snap_name} for c in components]},
+                    async_=True,
                 )
+                pid = ptask.get("ID")
+                pfinal = await aptly.wait_for_task(pid)
+                if pfinal.get("State") == TASK_FAILED:
+                    output = await aptly.get_task_output(pid)
+                    raise AptlyError(f"republish failed: {output.strip()[:200]}")
+                await aptly.delete_task(pid)
                 detail = f"updated mirror and republished {sched.publish_prefix}/{sched.publish_distribution}"
             else:
                 detail = "updated mirror packages"
