@@ -78,7 +78,7 @@ async def delete_schedule(
     return {"message": "Schedule deleted"}
 
 
-@router.post("/{schedule_id}/run")
+@router.post("/{schedule_id}/run", status_code=status.HTTP_202_ACCEPTED)
 async def run_now(
     schedule_id: int, user: User = Depends(require_operator), db: AsyncSession = Depends(get_db)
 ):
@@ -90,6 +90,8 @@ async def run_now(
         # falsely report success.
         raise HTTPException(status.HTTP_409_CONFLICT, "Schedule is disabled; enable it before running")
     await audit.record(db, username=user.username, action="run_schedule", resource=sched.name, method="POST")
-    await sched_mod.run_schedule(schedule_id)
-    await db.refresh(sched)
-    return {"message": "Schedule executed", "last_status": sched.last_status}
+    # Fire in the background and return immediately — a fleet refresh can take
+    # minutes. The run writes last_run/last_status when it finishes, which the
+    # UI picks up by polling.
+    sched_mod.run_in_background(schedule_id)
+    return {"message": "Schedule run started"}

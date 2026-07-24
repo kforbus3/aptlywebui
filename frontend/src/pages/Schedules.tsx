@@ -43,6 +43,8 @@ export default function Schedules() {
   const { data, isLoading } = useQuery({
     queryKey: ["schedules"],
     queryFn: async () => (await api.get<Schedule[]>("/schedules")).data,
+    // Runs are fired in the background, so poll to reflect Last Status updates.
+    refetchInterval: 5000,
   });
 
   const remove = useMutation({
@@ -56,8 +58,8 @@ export default function Schedules() {
 
   const run = useMutation({
     mutationFn: (id: number) => api.post(`/schedules/${id}/run`, {}),
-    onSuccess: (res) => {
-      toast.success(`Run complete: ${(res.data as any)?.last_status || "ok"}`);
+    onSuccess: () => {
+      toast.success("Run started — Last Status updates when it finishes");
       qc.invalidateQueries({ queryKey: ["schedules"] });
     },
     onError: (e) => toast.error(apiError(e)),
