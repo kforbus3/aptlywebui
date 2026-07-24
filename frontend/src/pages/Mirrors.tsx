@@ -16,11 +16,15 @@ interface Mirror {
   Architectures: string[];
 }
 
+// Each preset carries the full set of components that distribution actually
+// publishes, so selecting one auto-populates every available component.
+// Debian gained non-free-firmware in Bookworm (12); Bullseye (11) predates it.
 const PRESETS: Record<string, { url: string; dist: string; comps: string }> = {
-  "Debian Bookworm": { url: "http://deb.debian.org/debian", dist: "bookworm", comps: "main contrib non-free" },
-  "Debian Bullseye": { url: "http://deb.debian.org/debian", dist: "bullseye", comps: "main contrib" },
-  "Ubuntu Jammy": { url: "http://archive.ubuntu.com/ubuntu", dist: "jammy", comps: "main restricted universe" },
-  "Ubuntu Noble": { url: "http://archive.ubuntu.com/ubuntu", dist: "noble", comps: "main restricted universe" },
+  "Debian Trixie (13)": { url: "http://deb.debian.org/debian", dist: "trixie", comps: "main contrib non-free non-free-firmware" },
+  "Debian Bookworm (12)": { url: "http://deb.debian.org/debian", dist: "bookworm", comps: "main contrib non-free non-free-firmware" },
+  "Debian Bullseye (11)": { url: "http://deb.debian.org/debian", dist: "bullseye", comps: "main contrib non-free" },
+  "Ubuntu Noble (24.04)": { url: "http://archive.ubuntu.com/ubuntu", dist: "noble", comps: "main restricted universe multiverse" },
+  "Ubuntu Jammy (22.04)": { url: "http://archive.ubuntu.com/ubuntu", dist: "jammy", comps: "main restricted universe multiverse" },
 };
 
 export default function Mirrors() {
@@ -180,7 +184,8 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
     setUrl(p.url);
     setDist(p.dist);
     setComps(p.comps);
-    if (!name) setName(key.toLowerCase().replace(/\s+/g, "-"));
+    // Derive a clean mirror name (e.g. "debian-trixie"), dropping the "(13)" label.
+    if (!name) setName(key.toLowerCase().replace(/\s*\(.*\)/, "").trim().replace(/\s+/g, "-"));
   }
 
   return (
