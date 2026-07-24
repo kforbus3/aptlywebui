@@ -11,13 +11,25 @@ import {
 interface Schedule {
   id: number;
   name: string;
+  kind?: string; // "mirror" | "publish"
   mirror: string;
+  targets?: string; // JSON list of {prefix,distribution} for kind "publish" ([] = all)
+  retention?: number;
   cron: string;
   enabled: boolean;
   publish_prefix?: string;
   publish_distribution?: string;
   last_run?: string;
   last_status?: string;
+}
+
+function scheduleTarget(s: Schedule): string {
+  if (s.kind === "publish") {
+    let list: unknown[] = [];
+    try { list = JSON.parse(s.targets || "[]"); } catch { list = []; }
+    return list.length ? `${list.length} publication(s)` : "all publications";
+  }
+  return s.mirror;
 }
 
 export default function Schedules() {
@@ -70,11 +82,12 @@ export default function Schedules() {
         ) : !data || data.length === 0 ? (
           <EmptyState icon={<CalendarClock size={32} />} title="No schedules yet" hint="Create a schedule to automate mirror syncs." />
         ) : (
-          <Table head={["Name", "Mirror", "Cron", "Enabled", "Last Status", ""]}>
+          <Table head={["Name", "Type", "Target", "Cron", "Enabled", "Last Status", ""]}>
             {data.map((s) => (
               <tr key={s.id} className="hover:bg-slate-800/40">
                 <td className="px-4 py-3 font-medium text-slate-200">{s.name}</td>
-                <td className="px-4 py-3 text-slate-400">{s.mirror}</td>
+                <td className="px-4 py-3"><Badge color={s.kind === "publish" ? "purple" : "blue"}>{s.kind === "publish" ? "publications" : "mirror"}</Badge></td>
+                <td className="px-4 py-3 text-slate-400">{scheduleTarget(s)}</td>
                 <td className="px-4 py-3 font-mono text-slate-400">{s.cron}</td>
                 <td className="px-4 py-3"><Badge color={s.enabled ? "green" : "slate"}>{s.enabled ? "enabled" : "disabled"}</Badge></td>
                 <td className="px-4 py-3 text-slate-400">{s.last_status || "—"}</td>
@@ -127,18 +140,29 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
   const qc = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState(schedule?.name || "");
-  const [mirror, setMirror] = useState(schedule?.mirror || "");
-  const [cron, setCron] = useState(schedule?.cron || "");
+  const [kind, setKind] = useState<"mirror" | "publish">((schedule?.kind as any) || "publish");
+  const [cron, setCron] = useState(schedule?.cron || "0 3 * * *");
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
-  const [republish, setRepublish] = useState(
-    !!(schedule?.publish_prefix && schedule?.publish_distribution)
-  );
-  // Encodes the selected publication as "<prefix>\n<distribution>".
+  const [retention, setRetention] = useState(String(schedule?.retention ?? 7));
+
+  // mirror-kind state
+  const [mirror, setMirror] = useState(schedule?.mirror || "");
+  const [republish, setRepublish] = useState(!!(schedule?.publish_prefix && schedule?.publish_distribution));
   const [target, setTarget] = useState(
     schedule?.publish_prefix && schedule?.publish_distribution
       ? `${schedule.publish_prefix}\n${schedule.publish_distribution}`
       : ""
   );
+
+  // publish-kind state: all publications, or a chosen subset (encoded "prefix\ndist").
+  const initialTargets: string[] = (() => {
+    try {
+      return (JSON.parse(schedule?.targets || "[]") as { prefix: string; distribution: string }[])
+        .map((t) => `${t.prefix || "_empty_"}\n${t.distribution}`);
+    } catch { return []; }
+  })();
+  const [allPubs, setAllPubs] = useState(initialTargets.length === 0);
+  const [selectedPubs, setSelectedPubs] = useState<string[]>(initialTargets);
 
   const mirrors = useQuery({
     queryKey: ["mirrors"],
@@ -149,19 +173,28 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
     queryFn: async () => (await api.get<{ Prefix: string; Distribution: string }[]>("/publish")).data,
   });
 
+  function togglePub(key: string) {
+    setSelectedPubs((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
+  }
+
   const save = useMutation({
     mutationFn: () => {
-      const [tPrefix, tDist] = republish && target ? target.split("\n") : ["", ""];
-      // Send empty strings (not undefined) so clearing the publish target
-      // actually clears it (the PATCH uses exclude_unset).
-      const body = {
-        name,
-        mirror,
-        cron,
-        enabled,
-        publish_prefix: tPrefix,
-        publish_distribution: tDist,
-      };
+      let body: Record<string, unknown>;
+      if (kind === "publish") {
+        const targets = allPubs
+          ? []
+          : selectedPubs.map((k) => { const [prefix, distribution] = k.split("\n"); return { prefix, distribution }; });
+        body = {
+          name, kind: "publish", cron, enabled, retention: Number(retention) || 0,
+          targets: JSON.stringify(targets), mirror: "", publish_prefix: "", publish_distribution: "",
+        };
+      } else {
+        const [tPrefix, tDist] = republish && target ? target.split("\n") : ["", ""];
+        body = {
+          name, kind: "mirror", mirror, cron, enabled, retention: Number(retention) || 0,
+          publish_prefix: tPrefix, publish_distribution: tDist, targets: "",
+        };
+      }
       return schedule ? api.patch(`/schedules/${schedule.id}`, body) : api.post("/schedules", body);
     },
     onSuccess: () => {
@@ -172,7 +205,10 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
     onError: (e) => toast.error(apiError(e)),
   });
 
-  const missingTarget = republish && !target;
+  const invalid =
+    !name || !cron ||
+    (kind === "mirror" && (!mirror || (republish && !target))) ||
+    (kind === "publish" && !allPubs && selectedPubs.length === 0);
 
   return (
     <Modal
@@ -182,57 +218,106 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={save.isPending} onClick={() => save.mutate()} disabled={!name || !mirror || !cron || missingTarget}>
+          <Button loading={save.isPending} onClick={() => save.mutate()} disabled={invalid}>
             {schedule ? "Save" : "Create"}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
-        <div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="nightly-sync" /></div>
+        <div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="nightly-refresh" /></div>
+
         <div>
-          <Label>Mirror</Label>
-          <Select value={mirror} onChange={(e) => setMirror(e.target.value)}>
-            <option value="">Select…</option>
-            {(mirrors.data || []).map((m) => <option key={m.Name} value={m.Name}>{m.Name}</option>)}
+          <Label>What to run</Label>
+          <Select value={kind} onChange={(e) => setKind(e.target.value as any)}>
+            <option value="publish">Refresh publications — sync, snapshot &amp; re-publish</option>
+            <option value="mirror">Sync a single mirror</option>
           </Select>
         </div>
+
+        {kind === "publish" ? (
+          <div className="rounded-lg border border-slate-800 p-3">
+            <label className="flex items-center gap-2 text-sm text-slate-200">
+              <input type="checkbox" checked={allPubs} onChange={(e) => setAllPubs(e.target.checked)} />
+              All publications
+            </label>
+            {!allPubs && (
+              <div className="mt-2 space-y-1">
+                {(publications.data || []).length === 0 && <p className="text-xs text-slate-500">No publications yet.</p>}
+                {(publications.data || []).map((p) => {
+                  const key = `${pubPrefix(p)}\n${p.Distribution}`;
+                  return (
+                    <label key={key} className="flex items-center gap-2 text-sm text-slate-300">
+                      <input type="checkbox" checked={selectedPubs.includes(key)} onChange={() => togglePub(key)} />
+                      {pubLabel(p)}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <p className="mt-2 text-xs text-slate-500">
+              Each run syncs every mirror behind these publications, creates a timestamped snapshot of
+              each, and switches every component to its new snapshot — the whole fleet in one job.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div>
+              <Label>Mirror</Label>
+              <Select value={mirror} onChange={(e) => setMirror(e.target.value)}>
+                <option value="">Select…</option>
+                {(mirrors.data || []).map((m) => <option key={m.Name} value={m.Name}>{m.Name}</option>)}
+              </Select>
+            </div>
+            <div className="rounded-lg border border-slate-800 p-3">
+              <label className="flex items-center gap-2 text-sm text-slate-200">
+                <input type="checkbox" checked={republish} onChange={(e) => setRepublish(e.target.checked)} />
+                Snapshot &amp; re-publish after each sync
+              </label>
+              {republish && (
+                <div className="mt-3">
+                  <Label>Published target to switch</Label>
+                  <Select value={target} onChange={(e) => setTarget(e.target.value)}>
+                    <option value="">Select a publication…</option>
+                    {(publications.data || []).map((p) => (
+                      <option key={pubLabel(p)} value={`${pubPrefix(p)}\n${p.Distribution}`}>{pubLabel(p)}</option>
+                    ))}
+                  </Select>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Best for a single-component publication. For multi-component repos use
+                    “Refresh publications” instead.
+                  </p>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         <div>
           <Label>Schedule (cron)</Label>
           <div className="flex gap-2">
-            <Input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 3 * * *" className="flex-1" />
-            <Select value="" onChange={(e) => e.target.value && setCron(e.target.value)} className="w-40">
-              <option value="">Presets…</option>
-              {CRON_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </Select>
+            {/* Wrappers own the width; Input/Select are w-full by default. */}
+            <div className="min-w-0 flex-1">
+              <Input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 3 * * *" />
+            </div>
+            <div className="w-40 shrink-0">
+              <Select value="" onChange={(e) => e.target.value && setCron(e.target.value)}>
+                <option value="">Presets…</option>
+                {CRON_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </Select>
+            </div>
           </div>
         </div>
+
+        <div>
+          <Label>Keep snapshots per mirror (0 = keep all)</Label>
+          <Input type="number" min="0" value={retention} onChange={(e) => setRetention(e.target.value.replace(/[^0-9]/g, ""))} className="w-32" />
+        </div>
+
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           Enabled
         </label>
-
-        <div className="rounded-lg border border-slate-800 p-3">
-          <label className="flex items-center gap-2 text-sm text-slate-200">
-            <input type="checkbox" checked={republish} onChange={(e) => setRepublish(e.target.checked)} />
-            Snapshot &amp; re-publish after each sync
-          </label>
-          {republish && (
-            <div className="mt-3">
-              <Label>Published target to switch</Label>
-              <Select value={target} onChange={(e) => setTarget(e.target.value)}>
-                <option value="">Select a publication…</option>
-                {(publications.data || []).map((p) => (
-                  <option key={pubLabel(p)} value={`${pubPrefix(p)}\n${p.Distribution}`}>{pubLabel(p)}</option>
-                ))}
-              </Select>
-              <p className="mt-2 text-xs text-slate-500">
-                Each run creates a timestamped snapshot from the mirror and switches this
-                published distribution to it. Leave unchecked to only refresh the mirror.
-              </p>
-            </div>
-          )}
-        </div>
       </div>
     </Modal>
   );

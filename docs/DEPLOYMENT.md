@@ -216,6 +216,24 @@ so it is never displayed again. Each ESM service publishes a `-security` and a
 `-updates` suite; mirror whichever you need as separate mirrors. FIPS and
 FIPS-Updates are signed by the same key and both verify automatically.
 
+## Scheduling automatic refreshes
+
+**Schedules** run cron jobs. Two kinds:
+
+- **Refresh publications** (the fleet job) — pick *All publications* (or a subset)
+  and a cron. Each run syncs every mirror behind those publications, creates a
+  timestamped snapshot of each, and switches every component to its new snapshot.
+  It resolves which mirror backs each component from the snapshot itself, so a
+  full multi-suite, multi-component setup (e.g. 12 mirrors → 3 publications)
+  refreshes in one nightly job with no per-item wiring. Set *Keep snapshots per
+  mirror* to bound how many timestamped snapshots are retained (older, unpublished
+  ones are pruned; published ones are always kept).
+- **Sync a single mirror** — the original per-mirror job, optionally snapshotting
+  and switching one publication. Best for a single-component publication.
+
+A typical full-mirror setup is one *Refresh publications* schedule over *All
+publications* at, say, `0 3 * * *` (daily 03:00 UTC).
+
 ## Backups
 
 Use the UI (**Backups** page, operator+) to create downloadable tarballs of aptly

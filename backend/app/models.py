@@ -49,8 +49,19 @@ class Schedule(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
-    # Resource the schedule operates on, e.g. a mirror name.
-    mirror: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Schedule kind: "mirror" (sync one mirror, optionally republish one target) or
+    # "publish" (fleet refresh: sync the mirrors behind the target publications,
+    # snapshot them dated, and switch each component to its new snapshot).
+    kind: Mapped[str] = mapped_column(String(32), default="mirror", server_default="mirror")
+    # Resource the "mirror"-kind schedule operates on (a mirror name). Unused for
+    # the "publish" kind.
+    mirror: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    # JSON list of {"prefix","distribution"} publications for the "publish" kind;
+    # an empty list means all publications.
+    targets: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # Snapshots to keep per mirror (newest first); 0 keeps all. Prunes the dated
+    # snapshots this schedule creates so nightly runs don't grow without bound.
+    retention: Mapped[int] = mapped_column(Integer, default=7, server_default="7")
     # Cron expression (minute hour day month day_of_week).
     cron: Mapped[str] = mapped_column(String(64), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

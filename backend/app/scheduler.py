@@ -7,6 +7,8 @@ fresh snapshot and switches the published distribution to it.
 
 from __future__ import annotations
 
+import json
+import re
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -19,6 +21,17 @@ from app.db import SessionLocal
 from app.models import Schedule
 
 scheduler = AsyncIOScheduler(timezone="UTC")
+
+# aptly sets a mirror-derived snapshot's Description to
+# "Snapshot from mirror [<name>]: ..." — the only reliable link back to the mirror.
+_MIRROR_RE = re.compile(r"from mirror \[([^\]]+)\]")
+
+
+def _mirror_of_snapshot(snap: dict | None) -> str | None:
+    if not snap:
+        return None
+    m = _MIRROR_RE.search(snap.get("Description", ""))
+    return m.group(1) if m else None
 
 
 def _job_id(schedule_id: int) -> str:
@@ -42,8 +55,139 @@ async def _publish_components(aptly: AptlyClient, prefix: str, distribution: str
     return ["main"]
 
 
+async def _sync_mirror(aptly: AptlyClient, mirror: str) -> None:
+    """Update a mirror's packages and wait for the aptly task to finish."""
+    task = await aptly.update_mirror_packages(mirror)
+    task_id = task.get("ID")
+    final = await aptly.wait_for_task(task_id)
+    if final.get("State") == TASK_FAILED:
+        output = await aptly.get_task_output(task_id)
+        raise AptlyError((output or "").strip()[:200] or "mirror update failed")
+    await aptly.delete_task(task_id)
+
+
+async def _run_mirror_sync(aptly: AptlyClient, sched: Schedule) -> str:
+    """Legacy kind: sync one mirror, optionally snapshot + republish one target."""
+    await _sync_mirror(aptly, sched.mirror)
+    if not (sched.publish_prefix and sched.publish_distribution):
+        return "updated mirror packages"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    snap_name = f"{sched.mirror}-{stamp}"
+    await aptly.create_snapshot_from_mirror(sched.mirror, {"Name": snap_name})
+    components = await _publish_components(aptly, sched.publish_prefix, sched.publish_distribution)
+    ptask = await aptly.update_publish(
+        sched.publish_prefix, sched.publish_distribution,
+        {"Snapshots": [{"Component": c, "Name": snap_name} for c in components]}, async_=True,
+    )
+    pfinal = await aptly.wait_for_task(ptask.get("ID"))
+    if pfinal.get("State") == TASK_FAILED:
+        output = await aptly.get_task_output(ptask.get("ID"))
+        raise AptlyError(f"republish failed: {(output or '').strip()[:200]}")
+    await aptly.delete_task(ptask.get("ID"))
+    if sched.retention and sched.retention > 0:
+        await _prune_snapshots(aptly, {sched.mirror}, sched.retention)
+    return f"updated mirror and republished {sched.publish_prefix}/{sched.publish_distribution}"
+
+
+async def _run_publish_refresh(aptly: AptlyClient, sched: Schedule) -> str:
+    """Fleet kind: for the target publications (empty = all), sync the mirrors
+    behind each component, snapshot them dated, and switch each component to its
+    new snapshot. Component→mirror is resolved from each snapshot's source."""
+    raw = (sched.targets or "").strip()
+    targets = json.loads(raw) if raw else []
+    want = {(_clean_prefix(t.get("prefix", "")), t.get("distribution", "")) for t in targets}
+    pubs = await aptly.list_publish()
+    if want:
+        pubs = [p for p in pubs if (_clean_prefix(p.get("Prefix", "")), p.get("Distribution", "")) in want]
+    if not pubs:
+        return "no matching publications"
+
+    # Resolve each component's source mirror; collect the unique set to sync.
+    comp_mirror: dict[tuple[int, str], str] = {}
+    mirrors: set[str] = set()
+    for i, p in enumerate(pubs):
+        for s in p.get("Sources") or []:
+            comp, snap = s.get("Component"), s.get("Name")
+            mir = _mirror_of_snapshot(await aptly.get_snapshot(snap) if snap else None)
+            if mir:
+                comp_mirror[(i, comp)] = mir
+                mirrors.add(mir)
+    if not mirrors:
+        return "no mirror-backed components to refresh"
+
+    # Sync + dated-snapshot each mirror once.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    new_snap: dict[str, str] = {}
+    failures: list[str] = []
+    for m in sorted(mirrors):
+        try:
+            await _sync_mirror(aptly, m)
+            sname = f"{m}-{stamp}"
+            await aptly.create_snapshot_from_mirror(m, {"Name": sname})
+            new_snap[m] = sname
+        except AptlyError as exc:
+            failures.append(f"{m}: {exc}")
+
+    # Switch each publication's components to their new snapshots (a component
+    # whose mirror failed keeps its current snapshot).
+    republished = 0
+    for i, p in enumerate(pubs):
+        sources = p.get("Sources") or []
+        snapshots = [
+            {"Component": s.get("Component"),
+             "Name": new_snap.get(comp_mirror.get((i, s.get("Component"))), s.get("Name"))}
+            for s in sources
+        ]
+        if not any(sn["Name"] != s.get("Name") for sn, s in zip(snapshots, sources)):
+            continue  # nothing changed for this publication
+        dist = p.get("Distribution")
+        try:
+            ptask = await aptly.update_publish(p.get("Prefix", ""), dist, {"Snapshots": snapshots}, async_=True)
+            pfinal = await aptly.wait_for_task(ptask.get("ID"))
+            if pfinal.get("State") == TASK_FAILED:
+                output = await aptly.get_task_output(ptask.get("ID"))
+                failures.append(f"publish {dist}: {(output or '').strip()[:120]}")
+            else:
+                await aptly.delete_task(ptask.get("ID"))
+                republished += 1
+        except AptlyError as exc:
+            failures.append(f"publish {dist}: {exc}")
+
+    pruned = 0
+    if sched.retention and sched.retention > 0 and new_snap:
+        pruned = await _prune_snapshots(aptly, set(new_snap), sched.retention)
+
+    parts = [f"synced {len(new_snap)}/{len(mirrors)} mirrors", f"republished {republished}"]
+    if pruned:
+        parts.append(f"pruned {pruned} snapshot(s)")
+    summary = ", ".join(parts)
+    if failures:
+        raise AptlyError(f"{summary}; errors: " + "; ".join(failures[:5]))
+    return summary
+
+
+async def _prune_snapshots(aptly: AptlyClient, mirrors: set[str], keep: int) -> int:
+    """Delete this-mirror snapshots beyond the newest `keep`. Published snapshots
+    are protected by aptly (delete refused) and simply skipped."""
+    try:
+        snaps = await aptly.list_snapshots()
+    except AptlyError:
+        return 0
+    pruned = 0
+    for m in mirrors:
+        mine = [s for s in snaps if _mirror_of_snapshot(s) == m]
+        mine.sort(key=lambda s: s.get("CreatedAt", ""), reverse=True)
+        for s in mine[keep:]:
+            try:
+                await aptly.delete_snapshot(s["Name"])
+                pruned += 1
+            except AptlyError:
+                pass  # published or has dependents — leave it
+    return pruned
+
+
 async def run_schedule(schedule_id: int) -> None:
-    """Execute a single schedule: update mirror, optionally re-publish."""
+    """Execute a schedule by kind: mirror sync (legacy) or publication refresh."""
     async with SessionLocal() as db:
         sched = await db.get(Schedule, schedule_id)
         if not sched or not sched.enabled:
@@ -51,40 +195,10 @@ async def run_schedule(schedule_id: int) -> None:
         aptly = AptlyClient()
         status, detail = "success", ""
         try:
-            # Trigger the async mirror update and wait for the aptly task to
-            # finish before snapshotting — the snapshot must see the completed
-            # download.
-            task = await aptly.update_mirror_packages(sched.mirror)
-            task_id = task.get("ID")
-            final = await aptly.wait_for_task(task_id)
-            if final.get("State") == TASK_FAILED:
-                output = await aptly.get_task_output(task_id)
-                raise AptlyError(f"mirror update failed: {output.strip()[:200]}")
-            await aptly.delete_task(task_id)
-            if sched.publish_prefix and sched.publish_distribution:
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-                snap_name = f"{sched.mirror}-{stamp}"
-                await aptly.create_snapshot_from_mirror(sched.mirror, {"Name": snap_name})
-                # Switch every component the target publishes, not just "main",
-                # so non-main / multi-component publications republish correctly.
-                components = await _publish_components(
-                    aptly, sched.publish_prefix, sched.publish_distribution
-                )
-                ptask = await aptly.update_publish(
-                    sched.publish_prefix,
-                    sched.publish_distribution,
-                    {"Snapshots": [{"Component": c, "Name": snap_name} for c in components]},
-                    async_=True,
-                )
-                pid = ptask.get("ID")
-                pfinal = await aptly.wait_for_task(pid)
-                if pfinal.get("State") == TASK_FAILED:
-                    output = await aptly.get_task_output(pid)
-                    raise AptlyError(f"republish failed: {output.strip()[:200]}")
-                await aptly.delete_task(pid)
-                detail = f"updated mirror and republished {sched.publish_prefix}/{sched.publish_distribution}"
+            if sched.kind == "publish":
+                detail = await _run_publish_refresh(aptly, sched)
             else:
-                detail = "updated mirror packages"
+                detail = await _run_mirror_sync(aptly, sched)
         except AptlyError as exc:
             status, detail = "failure", str(exc)
         except Exception as exc:  # noqa: BLE001
@@ -96,7 +210,7 @@ async def run_schedule(schedule_id: int) -> None:
         sched.last_status = (status + ": " + detail)[:255]
         await db.commit()
         await audit.record(db, username="scheduler", action="scheduled_sync",
-                           resource=sched.mirror, status=status, detail=detail)
+                           resource=(sched.mirror or sched.name), status=status, detail=detail)
 
 
 def add_or_update_job(sched: Schedule) -> None:
