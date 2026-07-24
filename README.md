@@ -23,7 +23,9 @@ minimal, no-UI, drop-files-and-publish server instead? See the companion
   the UI (no CLI required).
 - **Mirror wizard** with Debian/Ubuntu presets. Mirrors of the official Debian
   repositories **verify signatures out of the box** — the archive keyring is
-  pre-loaded in the aptly image.
+  pre-loaded in the aptly image. Multi-component selections create **one mirror
+  per component** (aptly publishes one component per source), which the publish
+  form then recombines into a proper multi-component repository.
 - **Ubuntu Pro (ESM / FIPS) mirrors** — presets for ESM Infra, ESM Apps, FIPS and
   FIPS-Updates across Jammy/Focal/Bionic/Xenial. Supply your Pro token in the form
   and it authenticates automatically (the official Pro signing keys are pre-loaded,
