@@ -248,20 +248,34 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
   // the URL so it works for presets and hand-typed URLs alike.
   const needsAuth = /(^|\.)esm\.ubuntu\.com/.test(url);
 
+  const components = comps.split(/\s+/).filter(Boolean);
+  const multi = components.length > 1;
+
   const create = useMutation({
-    mutationFn: () =>
-      api.post("/mirrors", {
-        Name: name,
+    // aptly publishes one component per source (snapshot), so a repo can only be
+    // republished with its components intact if each component is its own mirror.
+    // We therefore create one mirror per component (named "<name>-<component>")
+    // when more than one is given; a single component keeps the plain name.
+    mutationFn: async () => {
+      const architectures = archs.split(/[\s,]+/).filter(Boolean);
+      const base = {
         ArchiveURL: url,
         Distribution: dist,
-        Components: comps.split(/\s+/).filter(Boolean),
-        Architectures: archs.split(/[\s,]+/).filter(Boolean),
+        Architectures: architectures,
         // AuthToken is spliced into the archive URL as HTTP basic auth by the
         // backend and never stored/echoed separately.
         ...(needsAuth && token ? { AuthToken: token } : {}),
-      }),
+      };
+      if (!multi) {
+        await api.post("/mirrors", { ...base, Name: name, Components: components });
+      } else {
+        for (const c of components) {
+          await api.post("/mirrors", { ...base, Name: `${name}-${c}`, Components: [c] });
+        }
+      }
+    },
     onSuccess: () => {
-      toast.success("Mirror created");
+      toast.success(multi ? `Created ${components.length} mirrors (one per component)` : "Mirror created");
       qc.invalidateQueries({ queryKey: ["mirrors"] });
       onClose();
     },
@@ -321,7 +335,16 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
         <div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="debian-bookworm" /></div>
         <div><Label>Archive URL</Label><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://deb.debian.org/debian" /></div>
         <div><Label>Distribution</Label><Input value={dist} onChange={(e) => setDist(e.target.value)} placeholder="bookworm" /></div>
-        <div><Label>Components (space-separated)</Label><Input value={comps} onChange={(e) => setComps(e.target.value)} /></div>
+        <div>
+          <Label>Components (space-separated)</Label>
+          <Input value={comps} onChange={(e) => setComps(e.target.value)} />
+          {multi && (
+            <p className="mt-1 text-xs text-slate-500">
+              Creates {components.length} mirrors — <span className="font-mono text-slate-400">{components.map((c) => `${name || "name"}-${c}`).join(", ")}</span>.
+              aptly publishes one component per source, so each component is its own mirror; publish them together on the Published page to get a proper multi-component repo.
+            </p>
+          )}
+        </div>
         <div><Label>Architectures (comma/space-separated)</Label><Input value={archs} onChange={(e) => setArchs(e.target.value)} /></div>
         {needsAuth && (
           <div>

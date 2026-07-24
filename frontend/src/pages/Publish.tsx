@@ -236,25 +236,30 @@ function ClientSetup({ target, onClose }: { target: Published; onClose: () => vo
 function SwitchSnapshot({ target, onClose }: { target: Published; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [snapshot, setSnapshot] = useState("");
   const [sign, setSign] = useState(true);
   const [skipContents, setSkipContents] = useState(false);
   const pub = usePublishTask("Switch", onClose);
+
+  // A published distribution can have several components; switch each to its own
+  // new snapshot (pointing them all at one snapshot would collapse the repo).
+  const targetComponents = target.Sources?.length
+    ? target.Sources.map((s) => s.Component)
+    : ["main"];
+  const [picks, setPicks] = useState<Record<string, string>>(
+    Object.fromEntries(targetComponents.map((c) => [c, ""])),
+  );
 
   const snapshots = useQuery({
     queryKey: ["snapshots"],
     queryFn: async () => (await api.get<{ Name: string }[]>("/snapshots")).data,
   });
 
+  const allPicked = targetComponents.every((c) => picks[c]);
+
   const swap = useMutation({
     mutationFn: () =>
-      // Switch every component the target actually publishes to the new
-      // snapshot; hardcoding "main" errors on any non-main/multi-component
-      // publication.
       api.put(`/publish/${prefixOf(target)}/${target.Distribution}`, {
-        Snapshots: (target.Sources?.length ? target.Sources : [{ Component: "main", Name: "" }]).map(
-          (s) => ({ Component: s.Component, Name: snapshot })
-        ),
+        Snapshots: targetComponents.map((c) => ({ Component: c, Name: picks[c] })),
         Signing: sign ? { Batch: true } : { Skip: true },
         SkipContents: skipContents,
       }),
@@ -275,19 +280,24 @@ function SwitchSnapshot({ target, onClose }: { target: Published; onClose: () =>
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>{busy ? "Close" : "Cancel"}</Button>
-          <Button loading={busy} onClick={() => swap.mutate()} disabled={busy || !snapshot}>
+          <Button loading={busy} onClick={() => swap.mutate()} disabled={busy || !allPicked}>
             {busy ? "Switching…" : "Switch"}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
-        <div>
-          <Label>New Snapshot</Label>
-          <Select value={snapshot} onChange={(e) => setSnapshot(e.target.value)}>
-            <option value="">Select…</option>
-            {(snapshots.data || []).map((s) => <option key={s.Name} value={s.Name}>{s.Name}</option>)}
-          </Select>
+        <div className="space-y-2">
+          <Label>New snapshot per component</Label>
+          {targetComponents.map((c) => (
+            <div key={c} className="flex items-center gap-2">
+              <span className="w-40 shrink-0 font-mono text-xs text-slate-400">{c}</span>
+              <Select className="flex-1" value={picks[c] || ""} onChange={(e) => setPicks((p) => ({ ...p, [c]: e.target.value }))}>
+                <option value="">Select…</option>
+                {(snapshots.data || []).map((s) => <option key={s.Name} value={s.Name}>{s.Name}</option>)}
+              </Select>
+            </div>
+          ))}
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" checked={sign} onChange={(e) => setSign(e.target.checked)} />
@@ -368,11 +378,26 @@ function RefreshRepo({ target, onClose }: { target: Published; onClose: () => vo
   );
 }
 
+// aptly maps one source (snapshot/repo) to one component, so a multi-component
+// publication needs a source per component. When a source is picked we guess its
+// component from its name (mirrors are created as "<base>-<component>"), longest
+// match first so "non-free-firmware" wins over "non-free".
+const KNOWN_COMPONENTS = ["non-free-firmware", "non-free", "contrib", "main", "restricted", "universe", "multiverse"];
+function guessComponent(name: string): string {
+  const lower = name.toLowerCase();
+  for (const c of KNOWN_COMPONENTS) {
+    if (new RegExp(`(^|[-_])${c}([-_]|$)`).test(lower)) return c;
+  }
+  return "main";
+}
+
+interface SourceRow { source: string; component: string }
+
 function PublishForm({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [sourceKind, setSourceKind] = useState<"snapshot" | "local">("snapshot");
-  const [source, setSource] = useState("");
+  const [rows, setRows] = useState<SourceRow[]>([{ source: "", component: "main" }]);
   const [distribution, setDistribution] = useState("");
   const [archs, setArchs] = useState("amd64");
   const [prefix, setPrefix] = useState("_empty_");
@@ -391,11 +416,20 @@ function PublishForm({ onClose }: { onClose: () => void }) {
   });
   const sources = sourceKind === "snapshot" ? snapshots.data : repos.data;
 
+  const setRow = (i: number, patch: Partial<SourceRow>) =>
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const addRow = () => setRows((rs) => [...rs, { source: "", component: "" }]);
+  const removeRow = (i: number) => setRows((rs) => rs.filter((_, j) => j !== i));
+
+  const filled = rows.filter((r) => r.source && r.component);
+  const dupComponent = new Set(filled.map((r) => r.component)).size !== filled.length;
+  const canPublish = filled.length > 0 && !!distribution && !dupComponent;
+
   const create = useMutation({
     mutationFn: () =>
       api.post(`/publish/${prefix || "_empty_"}`, {
         SourceKind: sourceKind,
-        Sources: [{ Name: source, Component: "main" }],
+        Sources: filled.map((r) => ({ Name: r.source, Component: r.component })),
         Distribution: distribution,
         Architectures: archs.split(/[\s,]+/).filter(Boolean),
         Signing: sign ? { Batch: true } : { Skip: true },
@@ -418,7 +452,7 @@ function PublishForm({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>{busy ? "Close" : "Cancel"}</Button>
-          <Button loading={busy} onClick={() => create.mutate()} disabled={busy || !source || !distribution}>
+          <Button loading={busy} onClick={() => create.mutate()} disabled={busy || !canPublish}>
             {busy ? "Publishing…" : "Publish"}
           </Button>
         </>
@@ -427,17 +461,47 @@ function PublishForm({ onClose }: { onClose: () => void }) {
       <div className="space-y-4">
         <div>
           <Label>Source Type</Label>
-          <Select value={sourceKind} onChange={(e) => { setSourceKind(e.target.value as "snapshot" | "local"); setSource(""); }}>
+          <Select value={sourceKind} onChange={(e) => { setSourceKind(e.target.value as "snapshot" | "local"); setRows([{ source: "", component: "main" }]); }}>
             <option value="snapshot">Snapshot</option>
             <option value="local">Local Repo (publish directly)</option>
           </Select>
         </div>
         <div>
-          <Label>{sourceKind === "snapshot" ? "Snapshot" : "Local Repo"}</Label>
-          <Select value={source} onChange={(e) => setSource(e.target.value)}>
-            <option value="">Select…</option>
-            {(sources || []).map((s) => <option key={s.Name} value={s.Name}>{s.Name}</option>)}
-          </Select>
+          <Label>Sources → components</Label>
+          <div className="space-y-2">
+            {rows.map((row, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Select
+                  className="flex-1"
+                  value={row.source}
+                  onChange={(e) => setRow(i, { source: e.target.value, component: row.component || guessComponent(e.target.value) })}
+                >
+                  <option value="">Select {sourceKind === "snapshot" ? "snapshot" : "repo"}…</option>
+                  {(sources || []).map((s) => <option key={s.Name} value={s.Name}>{s.Name}</option>)}
+                </Select>
+                <Input
+                  className="w-40"
+                  value={row.component}
+                  onChange={(e) => setRow(i, { component: e.target.value })}
+                  placeholder="component"
+                />
+                {rows.length > 1 && (
+                  <Button size="sm" variant="ghost" onClick={() => removeRow(i)} title="Remove">
+                    <Trash2 size={14} className="text-red-400" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={addRow} className="mt-2 flex items-center gap-1 text-xs text-brand-300 hover:text-brand-200">
+            <Plus size={13} /> Add component
+          </button>
+          {dupComponent && <p className="mt-1 text-xs text-red-400">Each component can appear only once.</p>}
+          <p className="mt-1 text-xs text-slate-500">
+            One source per component (e.g. the <span className="font-mono text-slate-400">-main</span>,
+            <span className="font-mono text-slate-400"> -contrib</span>, <span className="font-mono text-slate-400">-non-free</span> snapshots)
+            to publish a proper multi-component repo. The component is guessed from the name — adjust if needed.
+          </p>
         </div>
         <div><Label>Distribution</Label><Input value={distribution} onChange={(e) => setDistribution(e.target.value)} placeholder="bookworm" /></div>
         <div><Label>Architectures (comma/space-separated)</Label><Input value={archs} onChange={(e) => setArchs(e.target.value)} /></div>

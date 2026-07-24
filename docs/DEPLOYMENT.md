@@ -154,6 +154,26 @@ The **Published** page has a per-publication *apt setup* helper (terminal icon)
 that generates these exact commands. For public/production use, front the `repo`
 service with a TLS-terminating proxy too, and serve the key over HTTPS.
 
+## Multi-component repositories (main / contrib / non-free …)
+
+aptly maps **one source (snapshot/repo) to one component**, so a repository with
+several components is built from one mirror per component:
+
+1. **Mirrors** → *New Mirror*. Pick a Debian/Ubuntu preset (or list the components
+   yourself). With more than one component the UI creates **one mirror per
+   component**, named `<name>-<component>` (e.g. `debian-trixie-main`,
+   `debian-trixie-contrib`, `debian-trixie-non-free`, `debian-trixie-non-free-firmware`).
+   Components are disjoint, so this doesn't increase download size; the package
+   pool is shared by content hash.
+2. **Snapshots** → create a snapshot from each component mirror.
+3. **Published** → *Publish*. Add a source row per component, choosing the matching
+   snapshot; the component is guessed from the snapshot name. Publishing writes
+   `dists/<dist>/main/`, `contrib/`, `non-free/`, … as separate components.
+
+A single component (the default `main`) stays a single mirror with the plain name.
+Publishing a lone multi-component snapshot instead collapses every package into one
+component — which is why the per-component split exists.
+
 ## Mirroring Ubuntu Pro (ESM / FIPS)
 
 Ubuntu Pro archives (`esm.ubuntu.com`) require an auth token. The Create Mirror
