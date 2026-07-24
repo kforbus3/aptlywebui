@@ -235,17 +235,23 @@ class AptlyClient:
     async def list_publish(self):
         return await self._request("GET", "/publish")
 
-    async def publish_snapshot(self, prefix: str, data: dict):
+    async def publish_snapshot(self, prefix: str, data: dict, async_: bool = False):
+        # Publishing (index + Contents generation + signing) can take minutes on
+        # a large repo — longer than the HTTP client timeout — so interactive
+        # callers run it as a background aptly task (?_async=1) and poll it.
         prefix = _clean_prefix(prefix)
         url = f"/publish/{prefix}" if prefix else "/publish"
-        return await self._request("POST", url, json=data)
+        params = {"_async": "1"} if async_ else None
+        return await self._request("POST", url, params=params, json=data)
 
-    async def update_publish(self, prefix: str, distribution: str, data: dict):
+    async def update_publish(self, prefix: str, distribution: str, data: dict, async_: bool = False):
         # aptly's PUT route is always 3-segment /publish/:prefix/:distribution;
         # the root prefix must be passed as ":." (a bare "." is ambiguous in a
-        # URL), never as an omitted segment.
+        # URL), never as an omitted segment. Re-publishing is as slow as the
+        # initial publish, so it can also run async.
         prefix_seg = _clean_prefix(prefix) or ":."
-        return await self._request("PUT", f"/publish/{prefix_seg}/{distribution}", json=data)
+        params = {"_async": "1"} if async_ else None
+        return await self._request("PUT", f"/publish/{prefix_seg}/{distribution}", params=params, json=data)
 
     async def delete_publish(self, prefix: str, distribution: str, force: bool = False):
         prefix_seg = _clean_prefix(prefix) or ":."

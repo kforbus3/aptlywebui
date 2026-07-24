@@ -1,4 +1,6 @@
-FROM debian:bookworm-slim
+# Debian trixie ships aptly 1.6.1, whose API supports SkipContents (bookworm's
+# 1.5.0 panics on it) and keeps the mirror/publish routes this app relies on.
+FROM debian:trixie-slim
 
 # debian-archive-keyring ships the official Debian archive signing keys so
 # mirrors of the Debian repositories verify out of the box (imported into

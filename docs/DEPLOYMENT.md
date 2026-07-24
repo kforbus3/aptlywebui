@@ -210,6 +210,12 @@ docker compose up -d --build
 The database schema is created/extended automatically on start. Back up volumes
 before upgrading.
 
+> **Upgrading to v2.5.0+** bumps the bundled aptly engine from 1.5.0 to 1.6.1
+> (the aptly image base moves to Debian trixie). aptly 1.6 reads an existing 1.5
+> on-disk database and upgrades its format on first start; this is one-way, so
+> **take a backup first** (Backups page, or snapshot the `aptly-data` volume).
+> `docker compose up -d --build` rebuilds the aptly image automatically.
+
 ## Operations quick reference
 
 ```bash

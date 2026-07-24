@@ -51,9 +51,12 @@ export default function Layout({ children }: { children: ReactNode }) {
     queryFn: async () => (await api.get<any[]>("/tasks")).data,
     refetchInterval: 5000,
   });
-  const syncCount = (tasks || []).filter(
-    (t) => typeof t?.Name === "string" && t.Name.startsWith("Update mirror ") && (t.State === 0 || t.State === 1),
-  ).length;
+  const isRunning = (t: any) => t?.State === 0 || t?.State === 1;
+  const named = (tasks || []).filter((t) => typeof t?.Name === "string");
+  const syncCount = named.filter((t) => t.Name.startsWith("Update mirror ") && isRunning(t)).length;
+  const publishCount = named.filter((t) => /publish/i.test(t.Name) && isRunning(t)).length;
+  // Map a nav path to the count of relevant in-progress background tasks.
+  const navBusy: Record<string, number> = { "/mirrors": syncCount, "/publish": publishCount };
 
   return (
     <div className="flex h-full">
@@ -76,13 +79,13 @@ export default function Layout({ children }: { children: ReactNode }) {
             >
               <n.icon size={17} />
               <span className="flex-1">{n.label}</span>
-              {n.to === "/mirrors" && syncCount > 0 && (
+              {navBusy[n.to] > 0 && (
                 <span
-                  title={`${syncCount} mirror sync${syncCount > 1 ? "s" : ""} in progress`}
+                  title={`${navBusy[n.to]} operation${navBusy[n.to] > 1 ? "s" : ""} in progress`}
                   className="flex items-center gap-1 text-xs text-amber-300"
                 >
                   <RefreshCw size={12} className="animate-spin" />
-                  {syncCount}
+                  {navBusy[n.to]}
                 </span>
               )}
             </NavLink>
