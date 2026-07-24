@@ -28,8 +28,32 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Create tables if they do not exist."""
+    """Create tables if they do not exist, then apply lightweight column adds."""
     from app import models  # noqa: F401  (register models on Base.metadata)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)
+
+
+def _add_missing_columns(conn) -> None:
+    """create_all never alters existing tables, so add columns introduced by
+    later versions here. Idempotent: only adds a column when it's absent."""
+    from sqlalchemy import inspect, text
+
+    additions = {
+        "schedules": {
+            "kind": "VARCHAR(32) NOT NULL DEFAULT 'mirror'",
+            "targets": "TEXT NOT NULL DEFAULT ''",
+            "retention": "INTEGER NOT NULL DEFAULT 7",
+        },
+    }
+    inspector = inspect(conn)
+    tables = set(inspector.get_table_names())
+    for table, cols in additions.items():
+        if table not in tables:
+            continue
+        existing = {c["name"] for c in inspector.get_columns(table)}
+        for col, ddl in cols.items():
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))

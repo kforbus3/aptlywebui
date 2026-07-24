@@ -69,7 +69,10 @@ class AuditEntry(BaseModel):
 # --- Schedules ---
 class ScheduleBase(BaseModel):
     name: str
-    mirror: str
+    kind: str = "mirror"  # "mirror" | "publish"
+    mirror: str = ""
+    targets: str = ""  # JSON list of {prefix,distribution} for kind="publish" ([] = all)
+    retention: int = 7  # snapshots kept per mirror (0 = keep all)
     cron: str
     enabled: bool = True
     publish_prefix: str = ""
@@ -82,7 +85,10 @@ class ScheduleCreate(ScheduleBase):
 
 class ScheduleUpdate(BaseModel):
     name: str | None = None
+    kind: str | None = None
     mirror: str | None = None
+    targets: str | None = None
+    retention: int | None = None
     cron: str | None = None
     enabled: bool | None = None
     publish_prefix: str | None = None
