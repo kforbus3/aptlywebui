@@ -174,6 +174,22 @@ A single component (the default `main`) stays a single mirror with the plain nam
 Publishing a lone multi-component snapshot instead collapses every package into one
 component — which is why the per-component split exists.
 
+**Suites.** A full Debian mirror is three suites — the release, `-updates`, and
+`-security` — each its own publication (Distribution). The Create Mirror presets
+cover all three (and Ubuntu adds `-backports`); pick e.g. *Debian Trixie (13) —
+Security* and the archive host, distribution, and components are filled in. The
+Debian **security** archive names its components with an `updates/` prefix
+(`updates/main`, …); the per-component split strips that to a clean mirror name
+(`debian-trixie-security-main`) while the mirror still tracks the real component,
+and publishing remaps it back to the plain `main`/`contrib`/… component. So a
+client uses the normal:
+
+```
+deb http://repo/ trixie          main contrib non-free non-free-firmware
+deb http://repo/ trixie-updates  main contrib non-free non-free-firmware
+deb http://repo/ trixie-security main contrib non-free non-free-firmware
+```
+
 ## Mirroring Ubuntu Pro (ESM / FIPS)
 
 Ubuntu Pro archives (`esm.ubuntu.com`) require an auth token. The Create Mirror

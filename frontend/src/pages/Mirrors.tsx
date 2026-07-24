@@ -23,16 +23,53 @@ interface Preset {
   auth?: boolean; // requires an Ubuntu Pro token (HTTP basic auth to esm.ubuntu.com)
 }
 
-// Each preset carries the full set of components that distribution actually
-// publishes, so selecting one auto-populates every available component.
-// Debian gained non-free-firmware in Bookworm (12); Bullseye (11) predates it.
-const DISTRO_PRESETS: Record<string, Preset> = {
-  "Debian Trixie (13)": { url: "http://deb.debian.org/debian", dist: "trixie", comps: "main contrib non-free non-free-firmware" },
-  "Debian Bookworm (12)": { url: "http://deb.debian.org/debian", dist: "bookworm", comps: "main contrib non-free non-free-firmware" },
-  "Debian Bullseye (11)": { url: "http://deb.debian.org/debian", dist: "bullseye", comps: "main contrib non-free" },
-  "Ubuntu Noble (24.04)": { url: "http://archive.ubuntu.com/ubuntu", dist: "noble", comps: "main restricted universe multiverse" },
-  "Ubuntu Jammy (22.04)": { url: "http://archive.ubuntu.com/ubuntu", dist: "jammy", comps: "main restricted universe multiverse" },
-};
+// Each preset carries the full set of components that distribution/suite
+// actually publishes, so selecting one auto-populates every available component.
+// A full mirror of a Debian release is three suites: the release, -updates, and
+// -security (a separate archive host). The Debian security archive names its
+// components with an "updates/" prefix (e.g. updates/main) — the per-component
+// mirror split strips that back to a clean name, and publishing remaps to the
+// plain component. non-free-firmware exists only from Bookworm (12) onward.
+const DEB = "http://deb.debian.org/debian";
+const DEB_SEC = "http://deb.debian.org/debian-security";
+const UBU = "http://archive.ubuntu.com/ubuntu";
+const UBU_COMPS = "main restricted universe multiverse";
+
+function debComps(firmware: boolean, secPrefix = false): string {
+  const base = ["main", "contrib", "non-free", ...(firmware ? ["non-free-firmware"] : [])];
+  return (secPrefix ? base.map((c) => `updates/${c}`) : base).join(" ");
+}
+
+const DEBIAN_RELEASES: { code: string; label: string; firmware: boolean }[] = [
+  { code: "trixie", label: "Trixie (13)", firmware: true },
+  { code: "bookworm", label: "Bookworm (12)", firmware: true },
+  { code: "bullseye", label: "Bullseye (11)", firmware: false },
+];
+const UBUNTU_RELEASES: { code: string; label: string }[] = [
+  { code: "noble", label: "Noble (24.04)" },
+  { code: "jammy", label: "Jammy (22.04)" },
+];
+
+// Distro presets grouped per release (release / updates / security [/ backports]).
+const DISTRO_GROUPS: { group: string; presets: Record<string, Preset> }[] = [
+  ...DEBIAN_RELEASES.map((r) => ({
+    group: `Debian ${r.label}`,
+    presets: {
+      [`Debian ${r.label}`]: { url: DEB, dist: r.code, comps: debComps(r.firmware) },
+      [`Debian ${r.label} — Updates`]: { url: DEB, dist: `${r.code}-updates`, comps: debComps(r.firmware) },
+      [`Debian ${r.label} — Security`]: { url: DEB_SEC, dist: `${r.code}-security`, comps: debComps(r.firmware, true) },
+    } as Record<string, Preset>,
+  })),
+  ...UBUNTU_RELEASES.map((r) => ({
+    group: `Ubuntu ${r.label}`,
+    presets: {
+      [`Ubuntu ${r.label}`]: { url: UBU, dist: r.code, comps: UBU_COMPS },
+      [`Ubuntu ${r.label} — Updates`]: { url: UBU, dist: `${r.code}-updates`, comps: UBU_COMPS },
+      [`Ubuntu ${r.label} — Security`]: { url: UBU, dist: `${r.code}-security`, comps: UBU_COMPS },
+      [`Ubuntu ${r.label} — Backports`]: { url: UBU, dist: `${r.code}-backports`, comps: UBU_COMPS },
+    } as Record<string, Preset>,
+  })),
+];
 
 // Ubuntu Pro (ESM/FIPS) mirrors. These live behind esm.ubuntu.com and require a
 // per-service auth token (the "bearer" password from `pro attach`). Each service
@@ -66,9 +103,15 @@ const PRO_GROUPS: { group: string; presets: Record<string, Preset> }[] = PRO_REL
 
 // Flat lookup across every preset, for applyPreset.
 const ALL_PRESETS: Record<string, Preset> = {
-  ...DISTRO_PRESETS,
+  ...Object.fromEntries(DISTRO_GROUPS.flatMap((g) => Object.entries(g.presets))),
   ...Object.fromEntries(PRO_GROUPS.flatMap((g) => Object.entries(g.presets))),
 };
+
+// A mirror name suffix for a component, stripping any archive-path prefix
+// (Debian security's "updates/main" -> "main") so names stay clean and valid.
+function componentSlug(component: string): string {
+  return component.split("/").pop() || component;
+}
 
 export default function Mirrors() {
   const qc = useQueryClient();
@@ -270,7 +313,9 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
         await api.post("/mirrors", { ...base, Name: name, Components: components });
       } else {
         for (const c of components) {
-          await api.post("/mirrors", { ...base, Name: `${name}-${c}`, Components: [c] });
+          // Name from the component's final path segment (updates/main -> main);
+          // the mirror still tracks the real component path.
+          await api.post("/mirrors", { ...base, Name: `${name}-${componentSlug(c)}`, Components: [c] });
         }
       }
     },
@@ -322,9 +367,11 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
           <Label>Preset</Label>
           <Select defaultValue="" onChange={(e) => applyPreset(e.target.value)}>
             <option value="">Custom…</option>
-            <optgroup label="Debian / Ubuntu">
-              {Object.keys(DISTRO_PRESETS).map((k) => <option key={k} value={k}>{k}</option>)}
-            </optgroup>
+            {DISTRO_GROUPS.map((g) => (
+              <optgroup key={g.group} label={g.group}>
+                {Object.keys(g.presets).map((k) => <option key={k} value={k}>{k}</option>)}
+              </optgroup>
+            ))}
             {PRO_GROUPS.map((g) => (
               <optgroup key={g.group} label={g.group}>
                 {Object.keys(g.presets).map((k) => <option key={k} value={k}>{k}</option>)}
@@ -340,7 +387,7 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
           <Input value={comps} onChange={(e) => setComps(e.target.value)} />
           {multi && (
             <p className="mt-1 text-xs text-slate-500">
-              Creates {components.length} mirrors — <span className="font-mono text-slate-400">{components.map((c) => `${name || "name"}-${c}`).join(", ")}</span>.
+              Creates {components.length} mirrors — <span className="font-mono text-slate-400">{components.map((c) => `${name || "name"}-${componentSlug(c)}`).join(", ")}</span>.
               aptly publishes one component per source, so each component is its own mirror; publish them together on the Published page to get a proper multi-component repo.
             </p>
           )}
