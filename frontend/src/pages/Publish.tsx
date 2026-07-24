@@ -471,20 +471,24 @@ function PublishForm({ onClose }: { onClose: () => void }) {
           <div className="space-y-2">
             {rows.map((row, i) => (
               <div key={i} className="flex items-center gap-2">
-                <Select
-                  className="flex-1"
-                  value={row.source}
-                  onChange={(e) => setRow(i, { source: e.target.value, component: row.component || guessComponent(e.target.value) })}
-                >
-                  <option value="">Select {sourceKind === "snapshot" ? "snapshot" : "repo"}…</option>
-                  {(sources || []).map((s) => <option key={s.Name} value={s.Name}>{s.Name}</option>)}
-                </Select>
-                <Input
-                  className="w-40"
-                  value={row.component}
-                  onChange={(e) => setRow(i, { component: e.target.value })}
-                  placeholder="component"
-                />
+                {/* Width is controlled by these wrappers; Select/Input are w-full
+                    by default, so sizing them directly fights their own w-full. */}
+                <div className="min-w-0 flex-1">
+                  <Select
+                    value={row.source}
+                    onChange={(e) => setRow(i, { source: e.target.value, component: row.component || guessComponent(e.target.value) })}
+                  >
+                    <option value="">Select {sourceKind === "snapshot" ? "snapshot" : "repo"}…</option>
+                    {(sources || []).map((s) => <option key={s.Name} value={s.Name}>{s.Name}</option>)}
+                  </Select>
+                </div>
+                <div className="w-36 shrink-0">
+                  <Input
+                    value={row.component}
+                    onChange={(e) => setRow(i, { component: e.target.value })}
+                    placeholder="component"
+                  />
+                </div>
                 {rows.length > 1 && (
                   <Button size="sm" variant="ghost" onClick={() => removeRow(i)} title="Remove">
                     <Trash2 size={14} className="text-red-400" />
