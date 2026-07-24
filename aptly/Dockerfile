@@ -9,6 +9,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         aptly gnupg curl ca-certificates debian-archive-keyring \
     && rm -rf /var/lib/apt/lists/*
 
+# Official Ubuntu Pro (ESM/FIPS) archive signing keys, extracted from Canonical's
+# ubuntu-pro-client package. entrypoint.sh imports these into trustedkeys.gpg so
+# authenticated Ubuntu Pro mirrors (esm.ubuntu.com) verify out of the box:
+#   ubuntu-pro-esm-infra.gpg  56F7 650A 24C9 E9EC F87C  4D8D 4067 E403 13CB 4B13
+#   ubuntu-pro-esm-apps.gpg   E8A4 43CE 3581 13D1 87BE  E0E6 AB01 A101 DB53 907B
+#   ubuntu-pro-fips.gpg       E233 41B2 A146 7EDB F070  57D6 C199 7C40 EDE2 2758  (also signs fips-updates)
+COPY keyrings/ /usr/share/keyrings/
+
 COPY aptly.conf /etc/aptly.conf
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

@@ -16,15 +16,58 @@ interface Mirror {
   Architectures: string[];
 }
 
+interface Preset {
+  url: string;
+  dist: string;
+  comps: string;
+  auth?: boolean; // requires an Ubuntu Pro token (HTTP basic auth to esm.ubuntu.com)
+}
+
 // Each preset carries the full set of components that distribution actually
 // publishes, so selecting one auto-populates every available component.
 // Debian gained non-free-firmware in Bookworm (12); Bullseye (11) predates it.
-const PRESETS: Record<string, { url: string; dist: string; comps: string }> = {
+const DISTRO_PRESETS: Record<string, Preset> = {
   "Debian Trixie (13)": { url: "http://deb.debian.org/debian", dist: "trixie", comps: "main contrib non-free non-free-firmware" },
   "Debian Bookworm (12)": { url: "http://deb.debian.org/debian", dist: "bookworm", comps: "main contrib non-free non-free-firmware" },
   "Debian Bullseye (11)": { url: "http://deb.debian.org/debian", dist: "bullseye", comps: "main contrib non-free" },
   "Ubuntu Noble (24.04)": { url: "http://archive.ubuntu.com/ubuntu", dist: "noble", comps: "main restricted universe multiverse" },
   "Ubuntu Jammy (22.04)": { url: "http://archive.ubuntu.com/ubuntu", dist: "jammy", comps: "main restricted universe multiverse" },
+};
+
+// Ubuntu Pro (ESM/FIPS) mirrors. These live behind esm.ubuntu.com and require a
+// per-service auth token (the "bearer" password from `pro attach`). Each service
+// publishes a security and an updates suite; a mirror covers one suite, so we
+// generate a preset per (service, suite, release). Component is always "main".
+const PRO_RELEASES: { code: string; label: string }[] = [
+  { code: "jammy", label: "Jammy 22.04" },
+  { code: "focal", label: "Focal 20.04" },
+  { code: "bionic", label: "Bionic 18.04" },
+  { code: "xenial", label: "Xenial 16.04" },
+];
+const PRO_SERVICES: { label: string; url: string; suite: (r: string) => string }[] = [
+  { label: "ESM Infra (security)", url: "https://esm.ubuntu.com/infra/ubuntu", suite: (r) => `${r}-infra-security` },
+  { label: "ESM Infra (updates)", url: "https://esm.ubuntu.com/infra/ubuntu", suite: (r) => `${r}-infra-updates` },
+  { label: "ESM Apps (security)", url: "https://esm.ubuntu.com/apps/ubuntu", suite: (r) => `${r}-apps-security` },
+  { label: "ESM Apps (updates)", url: "https://esm.ubuntu.com/apps/ubuntu", suite: (r) => `${r}-apps-updates` },
+  { label: "FIPS", url: "https://esm.ubuntu.com/fips/ubuntu", suite: (r) => r },
+  { label: "FIPS Updates", url: "https://esm.ubuntu.com/fips-updates/ubuntu", suite: (r) => `${r}-updates` },
+];
+
+// Pro presets grouped by release (for <optgroup>), keyed by a unique label.
+const PRO_GROUPS: { group: string; presets: Record<string, Preset> }[] = PRO_RELEASES.map((rel) => ({
+  group: `Ubuntu Pro — ${rel.label}`,
+  presets: Object.fromEntries(
+    PRO_SERVICES.map((svc) => [
+      `${svc.label} — ${rel.label}`,
+      { url: svc.url, dist: svc.suite(rel.code), comps: "main", auth: true } as Preset,
+    ]),
+  ),
+}));
+
+// Flat lookup across every preset, for applyPreset.
+const ALL_PRESETS: Record<string, Preset> = {
+  ...DISTRO_PRESETS,
+  ...Object.fromEntries(PRO_GROUPS.flatMap((g) => Object.entries(g.presets))),
 };
 
 export default function Mirrors() {
@@ -160,6 +203,11 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
   const [dist, setDist] = useState("");
   const [comps, setComps] = useState("main");
   const [archs, setArchs] = useState("amd64");
+  const [token, setToken] = useState("");
+
+  // Ubuntu Pro archives (esm.ubuntu.com) require an auth token; detect it from
+  // the URL so it works for presets and hand-typed URLs alike.
+  const needsAuth = /(^|\.)esm\.ubuntu\.com/.test(url);
 
   const create = useMutation({
     mutationFn: () =>
@@ -169,6 +217,9 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
         Distribution: dist,
         Components: comps.split(/\s+/).filter(Boolean),
         Architectures: archs.split(/[\s,]+/).filter(Boolean),
+        // AuthToken is spliced into the archive URL as HTTP basic auth by the
+        // backend and never stored/echoed separately.
+        ...(needsAuth && token ? { AuthToken: token } : {}),
       }),
     onSuccess: () => {
       toast.success("Mirror created");
@@ -179,14 +230,25 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
   });
 
   function applyPreset(key: string) {
-    const p = PRESETS[key];
+    const p = ALL_PRESETS[key];
     if (!p) return;
     setUrl(p.url);
     setDist(p.dist);
     setComps(p.comps);
-    // Derive a clean mirror name (e.g. "debian-trixie"), dropping the "(13)" label.
-    if (!name) setName(key.toLowerCase().replace(/\s*\(.*\)/, "").trim().replace(/\s+/g, "-"));
+    // Derive a clean mirror name, dropping "(13)" labels and the " — Release"
+    // suffix on Pro presets (e.g. "esm-infra-security-jammy").
+    if (!name) {
+      setName(
+        key.toLowerCase()
+          .replace(/\s*\(.*?\)/g, "")
+          .replace(/\s*—\s*/g, "-")
+          .trim()
+          .replace(/\s+/g, "-"),
+      );
+    }
   }
+
+  const canCreate = !!name && !!url && !!dist && (!needsAuth || !!token);
 
   return (
     <Modal
@@ -196,7 +258,7 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={create.isPending} onClick={() => create.mutate()} disabled={!name || !url || !dist}>
+          <Button loading={create.isPending} onClick={() => create.mutate()} disabled={!canCreate}>
             Create
           </Button>
         </>
@@ -207,7 +269,14 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
           <Label>Preset</Label>
           <Select defaultValue="" onChange={(e) => applyPreset(e.target.value)}>
             <option value="">Custom…</option>
-            {Object.keys(PRESETS).map((k) => <option key={k} value={k}>{k}</option>)}
+            <optgroup label="Debian / Ubuntu">
+              {Object.keys(DISTRO_PRESETS).map((k) => <option key={k} value={k}>{k}</option>)}
+            </optgroup>
+            {PRO_GROUPS.map((g) => (
+              <optgroup key={g.group} label={g.group}>
+                {Object.keys(g.presets).map((k) => <option key={k} value={k}>{k}</option>)}
+              </optgroup>
+            ))}
           </Select>
         </div>
         <div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="debian-bookworm" /></div>
@@ -215,6 +284,17 @@ function CreateMirror({ onClose }: { onClose: () => void }) {
         <div><Label>Distribution</Label><Input value={dist} onChange={(e) => setDist(e.target.value)} placeholder="bookworm" /></div>
         <div><Label>Components (space-separated)</Label><Input value={comps} onChange={(e) => setComps(e.target.value)} /></div>
         <div><Label>Architectures (comma/space-separated)</Label><Input value={archs} onChange={(e) => setArchs(e.target.value)} /></div>
+        {needsAuth && (
+          <div>
+            <Label>Ubuntu Pro auth token</Label>
+            <Input type="password" value={token} onChange={(e) => setToken(e.target.value)}
+              placeholder="resource token from `pro attach`" autoComplete="off" />
+            <p className="mt-1 text-xs text-slate-500">
+              The per-service token from <code>/etc/apt/auth.conf.d/</code> (the password after
+              <code> login bearer</code>). Sent once, stored in the mirror URL, and never shown again.
+            </p>
+          </div>
+        )}
       </div>
     </Modal>
   );

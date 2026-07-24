@@ -130,13 +130,15 @@ function ClientSetup({ target, onClose }: { target: Published; onClose: () => vo
   const base = `http://${host}${port ? `:${port}` : ""}`;
   const prefix = target.Prefix && target.Prefix !== "." ? `${target.Prefix.replace(/^\/+|\/+$/g, "")}/` : "";
   const components = (target.Sources?.map((s) => s.Component).filter(Boolean).join(" ")) || "main";
-  const keyring = "/usr/share/keyrings/aptly-repo.gpg";
+  // Install the key into apt's trusted keyring directory so it applies globally
+  // and the sources line needs no signed-by= option.
+  const keyring = "/etc/apt/trusted.gpg.d/aptly-repo.gpg";
   const script = [
-    `# Import the repository signing key`,
+    `# Import the repository signing key (trusted for all sources)`,
     `curl -fsSL ${base}/gpg/public.key | sudo gpg --dearmor -o ${keyring}`,
     ``,
     `# Add the repository`,
-    `echo "deb [signed-by=${keyring}] ${base}/${prefix} ${target.Distribution} ${components}" \\`,
+    `echo "deb ${base}/${prefix} ${target.Distribution} ${components}" \\`,
     `  | sudo tee /etc/apt/sources.list.d/aptly-repo.list`,
     ``,
     `sudo apt update`,

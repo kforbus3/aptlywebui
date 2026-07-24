@@ -13,7 +13,10 @@ TRUSTED=/root/.gnupg/trustedkeys.gpg
 
 for keyring in \
     /usr/share/keyrings/debian-archive-keyring.gpg \
-    /usr/share/keyrings/ubuntu-archive-keyring.gpg
+    /usr/share/keyrings/ubuntu-archive-keyring.gpg \
+    /usr/share/keyrings/ubuntu-pro-esm-infra.gpg \
+    /usr/share/keyrings/ubuntu-pro-esm-apps.gpg \
+    /usr/share/keyrings/ubuntu-pro-fips.gpg
 do
     if [ -f "$keyring" ]; then
         gpg --no-default-keyring --keyring "$keyring" --export 2>/dev/null \

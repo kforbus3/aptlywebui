@@ -141,15 +141,44 @@ never served.
 On a client:
 
 ```bash
-curl -fsSL http://<host>/gpg/public.key | sudo gpg --dearmor -o /usr/share/keyrings/aptly-repo.gpg
-echo "deb [signed-by=/usr/share/keyrings/aptly-repo.gpg] http://<host>/ <dist> <component>" \
+curl -fsSL http://<host>/gpg/public.key | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/aptly-repo.gpg
+echo "deb http://<host>/ <dist> <component>" \
   | sudo tee /etc/apt/sources.list.d/aptly-repo.list
 sudo apt update
 ```
 
+Installing the key under `/etc/apt/trusted.gpg.d/` makes it trusted for all
+sources, so the sources line needs no `signed-by=` option.
+
 The **Published** page has a per-publication *apt setup* helper (terminal icon)
 that generates these exact commands. For public/production use, front the `repo`
 service with a TLS-terminating proxy too, and serve the key over HTTPS.
+
+## Mirroring Ubuntu Pro (ESM / FIPS)
+
+Ubuntu Pro archives (`esm.ubuntu.com`) require an auth token. The Create Mirror
+form has presets for **ESM Infra**, **ESM Apps**, **FIPS** and **FIPS Updates**
+across Jammy/Focal/Bionic/Xenial, and the official Pro signing keys are baked into
+the aptly image, so these verify signatures out of the box.
+
+1. On a machine attached to Ubuntu Pro (`sudo pro attach <contract-token>`), read
+   the per-service token — it is the password after `login bearer` in the
+   generated apt auth file:
+
+   ```bash
+   sudo grep -h esm.ubuntu.com /etc/apt/auth.conf.d/*
+   # machine esm.ubuntu.com/apps/ubuntu/ login bearer password <TOKEN>
+   ```
+
+2. In **Mirrors → New Mirror**, pick the matching Pro preset (e.g. *ESM Apps
+   (security) — Jammy 22.04*). A **Ubuntu Pro auth token** field appears — paste
+   `<TOKEN>` there and create the mirror.
+
+The token is spliced into the mirror's archive URL as HTTP basic auth (username
+`bearer`) and stored only there; the UI/API redact it from all mirror responses,
+so it is never displayed again. Each ESM service publishes a `-security` and a
+`-updates` suite; mirror whichever you need as separate mirrors. FIPS and
+FIPS-Updates are signed by the same key and both verify automatically.
 
 ## Backups
 
