@@ -63,6 +63,10 @@ export function Select({ className, children, ...props }: SelectHTMLAttributes<H
     <select
       className={clsx(
         "w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-brand-500",
+        // Explicit option/optgroup colors: Chrome renders a dark <select>'s open
+        // popup with unreadable options on Windows/Linux unless these are set
+        // (macOS uses a native popup and looks fine either way).
+        "[&_option]:bg-slate-900 [&_option]:text-slate-100 [&_optgroup]:bg-slate-900 [&_optgroup]:text-slate-400",
         className
       )}
       {...props}

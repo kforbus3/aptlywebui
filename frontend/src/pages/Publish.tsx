@@ -476,7 +476,7 @@ function PublishForm({ onClose }: { onClose: () => void }) {
                 <div className="min-w-0 flex-1">
                   <Select
                     value={row.source}
-                    onChange={(e) => setRow(i, { source: e.target.value, component: row.component || guessComponent(e.target.value) })}
+                    onChange={(e) => setRow(i, { source: e.target.value, component: guessComponent(e.target.value) })}
                   >
                     <option value="">Select {sourceKind === "snapshot" ? "snapshot" : "repo"}…</option>
                     {(sources || []).map((s) => <option key={s.Name} value={s.Name}>{s.Name}</option>)}
