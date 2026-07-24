@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Database, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api, apiError } from "../lib/api";
@@ -82,6 +82,31 @@ export default function Mirrors() {
     queryFn: async () => (await api.get<Mirror[]>("/mirrors")).data,
   });
 
+  // Poll aptly's live task list at the page level so an in-progress sync is
+  // ALWAYS visible here — regardless of who started it or whether the page was
+  // reloaded. Every row and its Sync button read from this single source.
+  const { data: tasks } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: async () => (await api.get<any[]>("/tasks")).data,
+    refetchInterval: 3000,
+  });
+  const syncing = (name: string) => isRunningSync(tasks, name);
+
+  // When any mirror finishes syncing, refresh the mirror list so package counts
+  // and status update even for observers who never clicked Sync themselves.
+  const runningKey = (tasks || [])
+    .filter((t) => t?.State === 0 || t?.State === 1)
+    .map((t) => t?.Name)
+    .sort()
+    .join("|");
+  const prevRunningKey = useRef(runningKey);
+  useEffect(() => {
+    if (prevRunningKey.current !== runningKey) {
+      qc.invalidateQueries({ queryKey: ["mirrors"] });
+      prevRunningKey.current = runningKey;
+    }
+  }, [runningKey, qc]);
+
   const remove = useMutation({
     mutationFn: (name: string) => api.delete(`/mirrors/${name}`, { params: { force: true } }),
     onSuccess: () => {
@@ -110,7 +135,7 @@ export default function Mirrors() {
         ) : !data || data.length === 0 ? (
           <EmptyState icon={<Database size={32} />} title="No mirrors yet" hint="Create a mirror to sync packages from an upstream repository." />
         ) : (
-          <Table head={["Name", "Distribution", "Components", "Architectures", ""]}>
+          <Table head={["Name", "Distribution", "Components", "Architectures", "Status", ""]}>
             {data.map((m) => (
               <tr key={m.Name} className="hover:bg-slate-800/40">
                 <td className="px-4 py-3 font-medium text-slate-200">{m.Name}</td>
@@ -118,9 +143,18 @@ export default function Mirrors() {
                 <td className="px-4 py-3 text-slate-400">{m.Components?.join(", ")}</td>
                 <td className="px-4 py-3 text-slate-400">{m.Architectures?.join(", ")}</td>
                 <td className="px-4 py-3">
+                  {syncing(m.Name) ? (
+                    <Badge color="amber">
+                      <RefreshCw size={11} className="mr-1 animate-spin" /> Syncing…
+                    </Badge>
+                  ) : (
+                    <Badge color="slate">Idle</Badge>
+                  )}
+                </td>
+                <td className="px-4 py-3">
                   {canEdit && (
                     <div className="flex justify-end gap-1">
-                      <SyncButton mirror={m.Name} />
+                      <SyncButton mirror={m.Name} running={syncing(m.Name)} />
                       <Button size="sm" variant="ghost"
                         onClick={() => { if (confirm(`Delete mirror "${m.Name}"?`)) remove.mutate(m.Name); }}>
                         <Trash2 size={14} className="text-red-400" />
@@ -140,7 +174,15 @@ export default function Mirrors() {
 
 // Triggers an async aptly mirror update and polls the resulting task to
 // completion, so a long sync never blocks the request or the UI.
-function SyncButton({ mirror }: { mirror: string }) {
+// aptly names a mirror-update task "Update mirror <name>"; States 0/1 are
+// init/running, 2 succeeded, 3 failed.
+function isRunningSync(tasks: any[] | undefined, mirror: string): boolean {
+  return (tasks || []).some(
+    (t) => t?.Name === `Update mirror ${mirror}` && (t.State === 0 || t.State === 1),
+  );
+}
+
+function SyncButton({ mirror, running }: { mirror: string; running: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [taskId, setTaskId] = useState<number | null>(null);
@@ -149,16 +191,15 @@ function SyncButton({ mirror }: { mirror: string }) {
     mutationFn: () => api.post(`/mirrors/${mirror}/update`, {}),
     onSuccess: (res) => {
       const id = (res.data as any)?.ID;
-      if (id != null) {
-        setTaskId(id);
-        qc.invalidateQueries({ queryKey: ["tasks"] });
-      } else {
-        toast.success(`${mirror} synced`);
-      }
+      if (id != null) setTaskId(id);
+      qc.invalidateQueries({ queryKey: ["tasks"] });
     },
     onError: (e) => toast.error(apiError(e)),
   });
 
+  // Completion toast for the session that started the sync. Whether the button
+  // is busy comes from the page-level task list (the `running` prop), so it
+  // stays correct across reloads and for syncs started elsewhere.
   const task = useQuery({
     queryKey: ["task", taskId],
     queryFn: async () => (await api.get(`/tasks/${taskId}`)).data as any,
@@ -168,26 +209,24 @@ function SyncButton({ mirror }: { mirror: string }) {
       return s === 2 || s === 3 ? false : 1500;
     },
   });
-
   const state = (task.data as any)?.State;
   useEffect(() => {
     if (state !== 2 && state !== 3) return;
     if (state === 2) {
       toast.success(`${mirror} synced`);
-      qc.invalidateQueries({ queryKey: ["mirrors"] });
-      qc.invalidateQueries({ queryKey: ["tasks"] });
-      setTaskId(null);
     } else {
       // Failed — surface aptly's task output as the error detail.
       api.get(`/tasks/${taskId}/output`)
         .then((r) => toast.error(`${mirror} sync failed: ${((r.data as any)?.output || "").trim().slice(-300) || "unknown error"}`))
-        .catch(() => toast.error(`${mirror} sync failed`))
-        .finally(() => setTaskId(null));
+        .catch(() => toast.error(`${mirror} sync failed`));
     }
+    qc.invalidateQueries({ queryKey: ["mirrors"] });
+    qc.invalidateQueries({ queryKey: ["tasks"] });
+    setTaskId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
-  const busy = start.isPending || taskId != null;
+  const busy = start.isPending || running || taskId != null;
   return (
     <Button size="sm" variant="secondary" loading={busy} onClick={() => start.mutate()}>
       <RefreshCw size={13} /> {busy ? "Syncing…" : "Sync"}
