@@ -24,6 +24,11 @@ minimal, no-UI, drop-files-and-publish server instead? See the companion
 - **Mirror wizard** with Debian/Ubuntu presets. Mirrors of the official Debian
   repositories **verify signatures out of the box** — the archive keyring is
   pre-loaded in the aptly image.
+- **Ubuntu Pro (ESM / FIPS) mirrors** — presets for ESM Infra, ESM Apps, FIPS and
+  FIPS-Updates across Jammy/Focal/Bionic/Xenial. Supply your Pro token in the form
+  and it authenticates automatically (the official Pro signing keys are pre-loaded,
+  so ESM/FIPS also verify out of the box). Tokens are stored in the mirror URL and
+  never echoed back to the UI.
 - **Non-blocking mirror syncs** — syncs run as background aptly tasks; the UI
   shows live per-mirror progress and reports success/failure without ever
   blocking on a long download.

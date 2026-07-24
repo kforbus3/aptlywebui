@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import time
 from typing import Any
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
@@ -38,6 +39,57 @@ def _clean_prefix(prefix: str) -> str:
     if prefix in ("_empty_", "."):
         return ""
     return prefix
+
+
+def _with_basic_auth(url: str, username: str, password: str) -> str:
+    """Embed HTTP basic-auth credentials in a URL's authority.
+
+    aptly has no dedicated auth field for mirrors, but honors credentials
+    embedded in the archive URL. Authenticated repositories such as Ubuntu Pro
+    ESM/FIPS use HTTP basic auth (username ``bearer``, password = the per-service
+    resource token), so we splice ``user:pass@`` into the host. Both parts are
+    percent-encoded since Pro tokens can contain reserved characters.
+    """
+    parts = urlsplit(url)
+    if not parts.hostname:
+        return url  # malformed/relative — leave untouched, aptly will reject it
+    host = parts.hostname
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    userinfo = quote(username, safe="")
+    if password:
+        userinfo += ":" + quote(password, safe="")
+    netloc = f"{userinfo}@{host}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def _strip_userinfo(url: str) -> str:
+    """Remove any ``user:pass@`` credentials from a URL for safe display.
+
+    Mirror archive URLs may carry an embedded auth token (see
+    ``_with_basic_auth``); aptly stores and echoes them back verbatim, so we
+    redact the credentials before returning mirror data to the UI/API.
+    """
+    if not isinstance(url, str) or "@" not in url:
+        return url
+    parts = urlsplit(url)
+    if not parts.username and not parts.password:
+        return url
+    host = parts.hostname or ""
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
+
+
+def _redact_mirror(mirror: Any) -> Any:
+    """Redact embedded credentials from a mirror object (or list of them)."""
+    if isinstance(mirror, list):
+        return [_redact_mirror(m) for m in mirror]
+    if isinstance(mirror, dict):
+        for key in ("ArchiveRoot", "ArchiveURL"):
+            if key in mirror:
+                mirror[key] = _strip_userinfo(mirror[key])
+    return mirror
 
 
 def _sanitize_dir(d: str | None) -> str:
@@ -90,13 +142,22 @@ class AptlyClient:
 
     # --- Mirrors ---
     async def list_mirrors(self):
-        return await self._request("GET", "/mirrors")
+        return _redact_mirror(await self._request("GET", "/mirrors"))
 
     async def get_mirror(self, name: str):
-        return await self._request("GET", f"/mirrors/{name}")
+        return _redact_mirror(await self._request("GET", f"/mirrors/{name}"))
 
     async def create_mirror(self, data: dict):
-        return await self._request("POST", "/mirrors", json=data)
+        # An optional AuthToken (Ubuntu Pro ESM/FIPS) is spliced into the archive
+        # URL as HTTP basic auth (default username "bearer") since aptly has no
+        # separate auth field. AuthToken/AuthUser are UI-only and never sent to
+        # aptly; the credential lives only inside the stored ArchiveURL.
+        data = dict(data)
+        token = data.pop("AuthToken", None)
+        username = data.pop("AuthUser", None) or "bearer"
+        if token:
+            data["ArchiveURL"] = _with_basic_auth(data.get("ArchiveURL", ""), username, token)
+        return _redact_mirror(await self._request("POST", "/mirrors", json=data))
 
     async def update_mirror(self, name: str, data: dict):
         # On aptly (verified against the bundled 1.5.0) the only mutating mirror
