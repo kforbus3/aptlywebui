@@ -7,6 +7,7 @@ fresh snapshot and switches the published distribution to it.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -21,6 +22,17 @@ from app.db import SessionLocal
 from app.models import Schedule
 
 scheduler = AsyncIOScheduler(timezone="UTC")
+
+# Strong refs to in-flight "run now" tasks so the loop doesn't GC them mid-run.
+_background_runs: set[asyncio.Task] = set()
+
+
+def run_in_background(schedule_id: int) -> None:
+    """Fire a schedule run on the event loop and return immediately. A full-fleet
+    sync takes minutes, so "run now" must not block the HTTP request."""
+    task = asyncio.create_task(run_schedule(schedule_id))
+    _background_runs.add(task)
+    task.add_done_callback(_background_runs.discard)
 
 # aptly sets a mirror-derived snapshot's Description to
 # "Snapshot from mirror [<name>]: ..." — the only reliable link back to the mirror.
