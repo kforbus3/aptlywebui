@@ -22,6 +22,9 @@ backend/data/
 *.asc
 *.gpg
 !frontend/public/favicon.svg
+# Exception: the baked-in Ubuntu Pro (ESM/FIPS) *public* signing keys must ship.
+!aptly/keyrings/
+!aptly/keyrings/*.gpg
 
 # OS / editor
 .DS_Store
