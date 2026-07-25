@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -21,7 +23,20 @@ from app.aptly import TASK_FAILED, AptlyClient, AptlyError, _clean_prefix
 from app.db import SessionLocal
 from app.models import Schedule
 
+logger = logging.getLogger("aptly-webui.scheduler")
+
 scheduler = AsyncIOScheduler(timezone="UTC")
+
+# Active timezone for cron interpretation and dated snapshot names. Set from the
+# stored setting at startup (configure_from_settings) and whenever an admin
+# changes it (apply_timezone). Both cron firing and the "%Y%m%d-%H%M%S" stamp in
+# snapshot names use this, so the name matches what the UI shows in local time.
+_app_tz = ZoneInfo("UTC")
+
+
+def _stamp() -> str:
+    """Timestamp for dated snapshot names, in the configured timezone."""
+    return datetime.now(_app_tz).strftime("%Y%m%d-%H%M%S")
 
 # Strong refs to in-flight "run now" tasks so the loop doesn't GC them mid-run.
 _background_runs: set[asyncio.Task] = set()
@@ -83,8 +98,7 @@ async def _run_mirror_sync(aptly: AptlyClient, sched: Schedule) -> str:
     await _sync_mirror(aptly, sched.mirror)
     if not (sched.publish_prefix and sched.publish_distribution):
         return "updated mirror packages"
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    snap_name = f"{sched.mirror}-{stamp}"
+    snap_name = f"{sched.mirror}-{_stamp()}"
     await aptly.create_snapshot_from_mirror(sched.mirror, {"Name": snap_name})
     components = await _publish_components(aptly, sched.publish_prefix, sched.publish_distribution)
     ptask = await aptly.update_publish(
@@ -128,7 +142,7 @@ async def _run_publish_refresh(aptly: AptlyClient, sched: Schedule) -> str:
         return "no mirror-backed components to refresh"
 
     # Sync + dated-snapshot each mirror once.
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = _stamp()
     new_snap: dict[str, str] = {}
     failures: list[str] = []
     for m in sorted(mirrors):
@@ -233,7 +247,7 @@ def add_or_update_job(sched: Schedule) -> None:
     if not sched.enabled:
         return
     try:
-        trigger = CronTrigger.from_crontab(sched.cron, timezone="UTC")
+        trigger = CronTrigger.from_crontab(sched.cron, timezone=_app_tz)
     except ValueError:
         return  # invalid cron — validated at the API layer, ignore here
     scheduler.add_job(run_schedule, trigger=trigger, args=[sched.id], id=job_id, replace_existing=True)
@@ -251,6 +265,31 @@ async def load_jobs() -> None:
         result = await db.execute(select(Schedule).where(Schedule.enabled == True))  # noqa: E712
         for sched in result.scalars().all():
             add_or_update_job(sched)
+
+
+async def configure_from_settings() -> None:
+    """Load the stored timezone into the scheduler at startup (call before
+    load_jobs so jobs register with the right cron timezone)."""
+    from app.settings_store import get_timezone
+
+    global _app_tz
+    async with SessionLocal() as db:
+        name = await get_timezone(db)
+    try:
+        _app_tz = ZoneInfo(name)
+        scheduler.timezone = _app_tz
+    except Exception:  # noqa: BLE001
+        logger.warning("Invalid stored timezone %r; keeping UTC", name)
+
+
+async def apply_timezone(name: str) -> None:
+    """Switch the active timezone and re-register every job so existing cron
+    triggers fire in the new zone. Called when an admin changes the setting."""
+    global _app_tz
+    _app_tz = ZoneInfo(name)  # caller validates; ZoneInfo raises on a bad name
+    scheduler.timezone = _app_tz
+    await load_jobs()
+    logger.info("Scheduler timezone set to %s", name)
 
 
 def start() -> None:

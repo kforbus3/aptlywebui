@@ -29,6 +29,10 @@ the table in the [README](../README.md#configuration)). The most important:
 
 - `SECRET_KEY` — set a strong, fixed value.
 - `ADMIN_PASSWORD` — set before first start; change it after logging in.
+- `APP_TIMEZONE` — default IANA timezone until an admin sets one in the UI
+  (default `UTC`). See [Timezone](#timezone).
+- `PUBLIC_REPO_URL` — internal URL of the published-repo web server, used to read
+  publication `Release` dates for the Mirrors view (default `http://repo`).
 
 ## TLS (HTTPS)
 
@@ -232,7 +236,31 @@ FIPS-Updates are signed by the same key and both verify automatically.
   and switching one publication. Best for a single-component publication.
 
 A typical full-mirror setup is one *Refresh publications* schedule over *All
-publications* at, say, `0 3 * * *` (daily 03:00 UTC).
+publications* at, say, `0 3 * * *` (daily 03:00).
+
+Cron times are interpreted in the configured **timezone** (see below), so
+`0 3 * * *` fires at 3 AM local — and the timestamped snapshot names use the same
+zone, so a snapshot's name matches the date shown in the UI.
+
+## Timezone
+
+**Settings → Timezone** (admin) sets one IANA timezone used for cron scheduling,
+the date stamp baked into snapshot names, and every timestamp shown in the UI
+(mirror last-sync/last-published, snapshots, audit log, backups, schedules).
+Changing it reschedules existing jobs immediately — no restart needed.
+
+The default before an admin sets one comes from the `APP_TIMEZONE` env var
+(falls back to `UTC`). The setting, once saved, persists in the database and
+overrides the env default.
+
+## Mirror sync & publish times
+
+The **Mirrors** page shows, per mirror, **Last Sync** (aptly's native last
+successful download) and **Last Published** — the most recent time a publication
+containing that mirror's snapshots was (re)published, with the publication(s)
+listed. Last-published time is read from each publication's `Release` file
+`Date:` over the internal `repo` service (`PUBLIC_REPO_URL`, default
+`http://repo`), since aptly's publish API carries no timestamp of its own.
 
 ## Backups
 

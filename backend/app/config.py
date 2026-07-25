@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     # The bundled nginx service serves this at /gpg/public.key. Set empty to
     # disable the export.
     public_key_path: str = "/data/keys/public.key"
+    # Default timezone (IANA name) for the scheduler and UI date display. Used
+    # only until an admin sets one in the UI, which persists to the database and
+    # takes precedence. See app.settings_store.
+    app_timezone: str = "UTC"
+    # Base URL of the published-repo web server (the bundled nginx "repo"
+    # service) that serves aptly's public/ dir. Used to read each publication's
+    # Release "Date:" — the true last-published time — for the Mirrors view.
+    public_repo_url: str = "http://repo"
 
     @property
     def db_path(self) -> str:

@@ -22,10 +22,11 @@ from app.routers import (
     backup,
     gpg,
     schedules,
+    settings as settings_router,
     system,
     users,
 )
-from app.scheduler import load_jobs, shutdown, start
+from app.scheduler import configure_from_settings, load_jobs, shutdown, start
 from app.seed import seed_admin
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     await seed_admin()
     start()
+    await configure_from_settings()
     await load_jobs()
     # Publish the signing public key for apt clients (served by nginx at
     # /gpg/public.key) so an existing key is available after a restart.
@@ -79,7 +81,8 @@ async def aptly_error_handler(_: Request, exc: AptlyError):
 
 # --- API routes (mounted under /api) ---
 for r in (auth.router, aptly_proxy.router, gpg.router, users.router,
-          audit.router, schedules.router, backup.router, system.router):
+          audit.router, schedules.router, backup.router, system.router,
+          settings_router.router):
     app.include_router(r, prefix="/api")
 
 

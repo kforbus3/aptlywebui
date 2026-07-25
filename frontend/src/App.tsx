@@ -15,6 +15,7 @@ import Backups from "./pages/Backups";
 import Users from "./pages/Users";
 import Audit from "./pages/Audit";
 import Account from "./pages/Account";
+import Settings from "./pages/Settings";
 
 function Protected({ children, role }: { children: JSX.Element; role?: "viewer" | "operator" | "admin" }) {
   const { user, loading, hasRole } = useAuth();
@@ -40,6 +41,7 @@ export default function App() {
       <Route path="/backups" element={<Protected role="operator"><Backups /></Protected>} />
       <Route path="/users" element={<Protected role="admin"><Users /></Protected>} />
       <Route path="/audit" element={<Protected role="admin"><Audit /></Protected>} />
+      <Route path="/settings" element={<Protected role="admin"><Settings /></Protected>} />
       <Route path="/account" element={<Protected><Account /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

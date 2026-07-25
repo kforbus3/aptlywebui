@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ScrollText } from "lucide-react";
 import { api } from "../lib/api";
+import { useFormatDateTime } from "../lib/settings";
 import {
   Card, Input, Label, Table, Badge, Spinner, EmptyState, PageHeader,
 } from "../components/ui";
@@ -20,6 +21,7 @@ interface AuditEntry {
 export default function Audit() {
   const [username, setUsername] = useState("");
   const [action, setAction] = useState("");
+  const fmt = useFormatDateTime();
 
   const { data, isLoading } = useQuery({
     queryKey: ["audit", username, action],
@@ -47,7 +49,7 @@ export default function Audit() {
           <Table head={["Time", "User", "Action", "Resource", "Status"]}>
             {data.map((e) => (
               <tr key={e.id} className="hover:bg-slate-800/40">
-                <td className="px-4 py-3 text-slate-400">{e.timestamp ? new Date(e.timestamp).toLocaleString() : "—"}</td>
+                <td className="px-4 py-3 text-slate-400">{e.timestamp ? fmt(e.timestamp) : "—"}</td>
                 <td className="px-4 py-3 text-slate-200">{e.username}</td>
                 <td className="px-4 py-3 text-slate-400">{e.action}</td>
                 <td className="px-4 py-3 font-mono text-xs text-slate-400">{e.resource}</td>
