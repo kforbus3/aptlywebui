@@ -171,9 +171,9 @@ default key, which is not something you control. The served `public.key` bundles
 **all** keys in the keyring, so apt clients verify successfully whichever key
 signed.
 
-> Scheduled **Refresh publications** runs currently re-sign with aptly's default
-> key (not a per-schedule choice). If you run multiple keys and want the nightly
-> job to use a specific one, that's a small follow-up — ask.
+Schedules that re-publish (**Refresh publications**, or a mirror sync with
+re-publish) have their own **Signing key** field, defaulting to aptly's default
+key. Set it to keep nightly signing deterministic when you run multiple keys.
 
 ## Multi-component repositories (main / contrib / non-free …)
 

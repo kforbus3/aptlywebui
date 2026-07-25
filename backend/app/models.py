@@ -81,6 +81,9 @@ class Schedule(Base):
     # Optional snapshot/publish prefix to refresh after the mirror updates.
     publish_prefix: Mapped[str] = mapped_column(String(128), default="")
     publish_distribution: Mapped[str] = mapped_column(String(128), default="")
+    # GPG key (id/fingerprint) to sign re-published distributions with; empty
+    # means aptly's default key. Applies when the schedule re-publishes.
+    gpg_key: Mapped[str] = mapped_column(String(64), default="", server_default="")
     last_run: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_status: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

@@ -65,6 +65,15 @@ def _job_id(schedule_id: int) -> str:
     return f"schedule-{schedule_id}"
 
 
+def _signing(sched: Schedule) -> dict:
+    """aptly Signing options for a scheduled re-publish. Always batch-signs; pins
+    the schedule's chosen key when set, else lets aptly use its default key."""
+    opts: dict = {"Batch": True}
+    if sched.gpg_key:
+        opts["GpgKey"] = sched.gpg_key
+    return opts
+
+
 async def _publish_components(aptly: AptlyClient, prefix: str, distribution: str) -> list[str]:
     """Return the component names of an existing publication, defaulting to
     ["main"] if it can't be resolved."""
@@ -103,7 +112,8 @@ async def _run_mirror_sync(aptly: AptlyClient, sched: Schedule) -> str:
     components = await _publish_components(aptly, sched.publish_prefix, sched.publish_distribution)
     ptask = await aptly.update_publish(
         sched.publish_prefix, sched.publish_distribution,
-        {"Snapshots": [{"Component": c, "Name": snap_name} for c in components]}, async_=True,
+        {"Snapshots": [{"Component": c, "Name": snap_name} for c in components],
+         "Signing": _signing(sched)}, async_=True,
     )
     pfinal = await aptly.wait_for_task(ptask.get("ID"))
     if pfinal.get("State") == TASK_FAILED:
@@ -168,7 +178,9 @@ async def _run_publish_refresh(aptly: AptlyClient, sched: Schedule) -> str:
             continue  # nothing changed for this publication
         dist = p.get("Distribution")
         try:
-            ptask = await aptly.update_publish(p.get("Prefix", ""), dist, {"Snapshots": snapshots}, async_=True)
+            ptask = await aptly.update_publish(
+                p.get("Prefix", ""), dist,
+                {"Snapshots": snapshots, "Signing": _signing(sched)}, async_=True)
             pfinal = await aptly.wait_for_task(ptask.get("ID"))
             if pfinal.get("State") == TASK_FAILED:
                 output = await aptly.get_task_output(ptask.get("ID"))

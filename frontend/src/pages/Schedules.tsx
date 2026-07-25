@@ -20,8 +20,15 @@ interface Schedule {
   enabled: boolean;
   publish_prefix?: string;
   publish_distribution?: string;
+  gpg_key?: string; // signing key id; "" = aptly default
   last_run?: string;
   last_status?: string;
+}
+
+interface GpgKey {
+  id: string;
+  fingerprint: string;
+  display: string;
 }
 
 function scheduleTarget(s: Schedule): string {
@@ -153,6 +160,7 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
   const [cron, setCron] = useState(schedule?.cron || "0 3 * * *");
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
   const [retention, setRetention] = useState(String(schedule?.retention ?? 7));
+  const [gpgKey, setGpgKey] = useState(schedule?.gpg_key || "");
 
   // mirror-kind state
   const [mirror, setMirror] = useState(schedule?.mirror || "");
@@ -181,6 +189,13 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
     queryKey: ["publish"],
     queryFn: async () => (await api.get<{ Prefix: string; Distribution: string }[]>("/publish")).data,
   });
+  const gpgKeys = useQuery({
+    queryKey: ["gpg-keys"],
+    queryFn: async () => (await api.get<GpgKey[]>("/gpg/keys")).data,
+  });
+
+  // The signing-key choice only matters when a run re-publishes.
+  const willPublish = kind === "publish" || (kind === "mirror" && republish);
 
   function togglePub(key: string) {
     setSelectedPubs((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
@@ -196,12 +211,14 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
         body = {
           name, kind: "publish", cron, enabled, retention: Number(retention) || 0,
           targets: JSON.stringify(targets), mirror: "", publish_prefix: "", publish_distribution: "",
+          gpg_key: gpgKey,
         };
       } else {
         const [tPrefix, tDist] = republish && target ? target.split("\n") : ["", ""];
         body = {
           name, kind: "mirror", mirror, cron, enabled, retention: Number(retention) || 0,
           publish_prefix: tPrefix, publish_distribution: tDist, targets: "",
+          gpg_key: republish ? gpgKey : "",
         };
       }
       return schedule ? api.patch(`/schedules/${schedule.id}`, body) : api.post("/schedules", body);
@@ -317,6 +334,20 @@ function ScheduleForm({ schedule, onClose }: { schedule?: Schedule; onClose: () 
             </div>
           </div>
         </div>
+
+        {willPublish && (
+          <div>
+            <Label>Signing key</Label>
+            <Select value={gpgKey} onChange={(e) => setGpgKey(e.target.value)}>
+              <option value="">Default key (aptly picks)</option>
+              {(gpgKeys.data || []).map((k) => <option key={k.fingerprint} value={k.id}>{k.display}</option>)}
+            </Select>
+            <p className="mt-1 text-xs text-slate-500">
+              Key used to sign the re-published distributions. Leave as default with a single key;
+              pick one to keep signing deterministic when the keyring has several.
+            </p>
+          </div>
+        )}
 
         <div>
           <Label>Keep snapshots per mirror (0 = keep all)</Label>
