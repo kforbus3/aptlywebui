@@ -77,6 +77,7 @@ class ScheduleBase(BaseModel):
     enabled: bool = True
     publish_prefix: str = ""
     publish_distribution: str = ""
+    gpg_key: str = ""  # signing key id/fingerprint; "" = aptly's default key
 
 
 class ScheduleCreate(ScheduleBase):
@@ -93,6 +94,7 @@ class ScheduleUpdate(BaseModel):
     enabled: bool | None = None
     publish_prefix: str | None = None
     publish_distribution: str | None = None
+    gpg_key: str | None = None
 
 
 class ScheduleResponse(ScheduleBase):

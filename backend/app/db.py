@@ -46,6 +46,7 @@ def _add_missing_columns(conn) -> None:
             "kind": "VARCHAR(32) NOT NULL DEFAULT 'mirror'",
             "targets": "TEXT NOT NULL DEFAULT ''",
             "retention": "INTEGER NOT NULL DEFAULT 7",
+            "gpg_key": "VARCHAR(64) NOT NULL DEFAULT ''",
         },
     }
     inspector = inspect(conn)
