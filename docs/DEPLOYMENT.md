@@ -158,6 +158,23 @@ The **Published** page has a per-publication *apt setup* helper (terminal icon)
 that generates these exact commands. For public/production use, front the `repo`
 service with a TLS-terminating proxy too, and serve the key over HTTPS.
 
+## Signing keys
+
+Manage keys on the **GPG Keys** page (generate or import). The `aptly` and
+`webui` containers share one keyring (`gpg` volume), and aptly signs
+publications with it.
+
+Every publish/switch/refresh dialog has a **Signing key** picker; it defaults to
+your first key. With a single key you can ignore it. With more than one key, pick
+the one to sign that publication — otherwise aptly would fall back to gpg's
+default key, which is not something you control. The served `public.key` bundles
+**all** keys in the keyring, so apt clients verify successfully whichever key
+signed.
+
+> Scheduled **Refresh publications** runs currently re-sign with aptly's default
+> key (not a per-schedule choice). If you run multiple keys and want the nightly
+> job to use a specific one, that's a small follow-up — ask.
+
 ## Multi-component repositories (main / contrib / non-free …)
 
 aptly maps **one source (snapshot/repo) to one component**, so a repository with
