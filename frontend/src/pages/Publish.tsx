@@ -44,6 +44,69 @@ function usePublishTask(label: string, onDone: () => void) {
   return { start: (id: number) => setTaskId(id), busy: taskId != null };
 }
 
+interface GpgKey {
+  id: string;
+  fingerprint: string;
+  name: string;
+  display: string;
+}
+
+// Shared signing state for the publish dialogs: the "GPG sign" toggle plus which
+// key to sign with. aptly signs with gpg's *default* key when no GpgKey is given
+// (ambiguous once there's more than one key), so we always pin an explicit key
+// when signing. Returns signing() -> the aptly Signing payload.
+function useSigning() {
+  const keys = useQuery({
+    queryKey: ["gpg-keys"],
+    queryFn: async () => (await api.get<GpgKey[]>("/gpg/keys")).data,
+  });
+  const list = keys.data || [];
+  const [sign, setSign] = useState(true);
+  const [gpgKey, setGpgKey] = useState<string>("");
+
+  // Pin the picker to the first key once keys load (or the sole key). Keeps the
+  // single-key case unambiguous and gives multi-key a sensible starting choice.
+  useEffect(() => {
+    if (!gpgKey && list.length > 0) setGpgKey(list[0].id);
+  }, [list, gpgKey]);
+
+  const signing = () => {
+    if (!sign) return { Skip: true };
+    const payload: Record<string, unknown> = { Batch: true };
+    if (gpgKey) payload.GpgKey = gpgKey;
+    return payload;
+  };
+  return { sign, setSign, gpgKey, setGpgKey, keys: list, loaded: !keys.isLoading, signing };
+}
+
+// The "GPG sign" checkbox plus, when signing, a key picker. Rendered by every
+// publish dialog so the choice is consistent.
+function SignControls({ s, hint }: { s: ReturnType<typeof useSigning>; hint?: string }) {
+  return (
+    <div className="space-y-2">
+      <label className="flex items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" checked={s.sign} onChange={(e) => s.setSign(e.target.checked)} />
+        GPG sign{hint ? ` ${hint}` : ""}
+      </label>
+      {s.sign && s.keys.length > 0 && (
+        <div className="pl-6">
+          <Label>Signing key</Label>
+          <Select value={s.gpgKey} onChange={(e) => s.setGpgKey(e.target.value)}>
+            {s.keys.map((k) => (
+              <option key={k.fingerprint} value={k.id}>{k.display}</option>
+            ))}
+          </Select>
+        </div>
+      )}
+      {s.sign && s.loaded && s.keys.length === 0 && (
+        <p className="pl-6 text-xs text-amber-400">
+          No signing key in the keyring — generate or import one on the GPG Keys page first, or signing will fail.
+        </p>
+      )}
+    </div>
+  );
+}
+
 interface PublishSource {
   Component: string;
   Name: string;
@@ -236,7 +299,7 @@ function ClientSetup({ target, onClose }: { target: Published; onClose: () => vo
 function SwitchSnapshot({ target, onClose }: { target: Published; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [sign, setSign] = useState(true);
+  const signer = useSigning();
   const [skipContents, setSkipContents] = useState(false);
   const pub = usePublishTask("Switch", onClose);
 
@@ -260,7 +323,7 @@ function SwitchSnapshot({ target, onClose }: { target: Published; onClose: () =>
     mutationFn: () =>
       api.put(`/publish/${prefixOf(target)}/${target.Distribution}`, {
         Snapshots: targetComponents.map((c) => ({ Component: c, Name: picks[c] })),
-        Signing: sign ? { Batch: true } : { Skip: true },
+        Signing: signer.signing(),
         SkipContents: skipContents,
       }),
     onSuccess: (res) => {
@@ -299,10 +362,7 @@ function SwitchSnapshot({ target, onClose }: { target: Published; onClose: () =>
             </div>
           ))}
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-300">
-          <input type="checkbox" checked={sign} onChange={(e) => setSign(e.target.checked)} />
-          GPG sign
-        </label>
+        <SignControls s={signer} />
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" checked={skipContents} onChange={(e) => setSkipContents(e.target.checked)} />
           Skip Contents index (faster, smaller)
@@ -322,14 +382,14 @@ function SwitchSnapshot({ target, onClose }: { target: Published; onClose: () =>
 function RefreshRepo({ target, onClose }: { target: Published; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [sign, setSign] = useState(true);
+  const signer = useSigning();
   const [skipContents, setSkipContents] = useState(false);
   const pub = usePublishTask("Refresh", onClose);
 
   const refresh = useMutation({
     mutationFn: () =>
       api.put(`/publish/${prefixOf(target)}/${target.Distribution}`, {
-        Signing: sign ? { Batch: true } : { Skip: true },
+        Signing: signer.signing(),
         SkipContents: skipContents,
       }),
     onSuccess: (res) => {
@@ -360,10 +420,7 @@ function RefreshRepo({ target, onClose }: { target: Published; onClose: () => vo
           Re-reads local repo <span className="font-mono text-slate-200">{target.Sources?.map((s) => s.Name).join(", ")}</span> and
           re-publishes it, picking up packages added or removed since the last publish.
         </p>
-        <label className="flex items-center gap-2 text-sm text-slate-300">
-          <input type="checkbox" checked={sign} onChange={(e) => setSign(e.target.checked)} />
-          GPG sign
-        </label>
+        <SignControls s={signer} />
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" checked={skipContents} onChange={(e) => setSkipContents(e.target.checked)} />
           Skip Contents index (faster, smaller)
@@ -401,7 +458,7 @@ function PublishForm({ onClose }: { onClose: () => void }) {
   const [distribution, setDistribution] = useState("");
   const [archs, setArchs] = useState("amd64");
   const [prefix, setPrefix] = useState("_empty_");
-  const [sign, setSign] = useState(true);
+  const signer = useSigning();
   const [skipContents, setSkipContents] = useState(false);
 
   const pub = usePublishTask("Publish", onClose);
@@ -432,7 +489,7 @@ function PublishForm({ onClose }: { onClose: () => void }) {
         Sources: filled.map((r) => ({ Name: r.source, Component: r.component })),
         Distribution: distribution,
         Architectures: archs.split(/[\s,]+/).filter(Boolean),
-        Signing: sign ? { Batch: true } : { Skip: true },
+        Signing: signer.signing(),
         SkipContents: skipContents,
       }),
     onSuccess: (res) => {
@@ -510,10 +567,7 @@ function PublishForm({ onClose }: { onClose: () => void }) {
         <div><Label>Distribution</Label><Input value={distribution} onChange={(e) => setDistribution(e.target.value)} placeholder="bookworm" /></div>
         <div><Label>Architectures (comma/space-separated)</Label><Input value={archs} onChange={(e) => setArchs(e.target.value)} /></div>
         <div><Label>Prefix (use "_empty_" for root)</Label><Input value={prefix} onChange={(e) => setPrefix(e.target.value)} /></div>
-        <label className="flex items-center gap-2 text-sm text-slate-300">
-          <input type="checkbox" checked={sign} onChange={(e) => setSign(e.target.checked)} />
-          GPG sign (otherwise published unsigned)
-        </label>
+        <SignControls s={signer} hint="(otherwise published unsigned)" />
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" checked={skipContents} onChange={(e) => setSkipContents(e.target.checked)} />
           Skip Contents index (faster publish, smaller repo)
