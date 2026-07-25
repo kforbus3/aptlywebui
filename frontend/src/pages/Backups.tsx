@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Archive, Plus, Trash2, Download, RotateCcw } from "lucide-react";
 import { api, apiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useFormatDateTime } from "../lib/settings";
 import { useToast } from "../components/Toast";
 import {
   Button, Card, Label, Modal, Table, Spinner, EmptyState, PageHeader,
@@ -24,6 +25,7 @@ export default function Backups() {
   const toast = useToast();
   const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
+  const fmt = useFormatDateTime();
   const [showRestore, setShowRestore] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -93,7 +95,7 @@ export default function Backups() {
               <tr key={b.name} className="hover:bg-slate-800/40">
                 <td className="px-4 py-3 font-medium text-slate-200">{b.name}</td>
                 <td className="px-4 py-3 text-slate-400">{formatSize(b.size)}</td>
-                <td className="px-4 py-3 text-slate-400">{b.created ? new Date(b.created).toLocaleString() : "—"}</td>
+                <td className="px-4 py-3 text-slate-400">{b.created ? fmt(b.created) : "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
                     <Button size="sm" variant="secondary" loading={download.isPending && download.variables === b.name}

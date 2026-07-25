@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Plus, Trash2, Play, Pencil } from "lucide-react";
 import { api, apiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useFormatDateTime } from "../lib/settings";
 import { useToast } from "../components/Toast";
 import {
   Button, Card, Input, Label, Select, Modal, Table, Badge, Spinner, EmptyState, PageHeader,
@@ -37,6 +38,7 @@ export default function Schedules() {
   const toast = useToast();
   const { hasRole } = useAuth();
   const canEdit = hasRole("operator");
+  const fmt = useFormatDateTime();
   const [showCreate, setShowCreate] = useState(false);
   const [edit, setEdit] = useState<Schedule | null>(null);
 
@@ -92,7 +94,12 @@ export default function Schedules() {
                 <td className="px-4 py-3 text-slate-400">{scheduleTarget(s)}</td>
                 <td className="px-4 py-3 font-mono text-slate-400">{s.cron}</td>
                 <td className="px-4 py-3"><Badge color={s.enabled ? "green" : "slate"}>{s.enabled ? "enabled" : "disabled"}</Badge></td>
-                <td className="px-4 py-3 text-slate-400">{s.last_status || "—"}</td>
+                <td className="px-4 py-3 text-slate-400">
+                  <div className="flex flex-col">
+                    <span>{s.last_status || "—"}</span>
+                    {s.last_run && <span className="text-xs text-slate-600">{fmt(s.last_run)}</span>}
+                  </div>
+                </td>
                 <td className="px-4 py-3">
                   {canEdit && (
                     <div className="flex justify-end gap-1">

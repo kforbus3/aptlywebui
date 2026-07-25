@@ -6,13 +6,15 @@ Read operations require the ``viewer`` role; mutating operations require
 
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, File, Form, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import audit
-from app.aptly import AptlyClient
+from app.aptly import AptlyClient, _clean_prefix, fetch_release_date, mirror_of_snapshot
 from app.db import get_db
 from app.deps import get_aptly, require_operator, require_viewer
 from app.models import User
@@ -24,6 +26,47 @@ router = APIRouter(tags=["aptly"])
 @router.get("/mirrors")
 async def list_mirrors(aptly: AptlyClient = Depends(get_aptly), _: User = Depends(require_viewer)):
     return await aptly.list_mirrors()
+
+
+@router.get("/mirrors/overview")
+async def mirrors_overview(aptly: AptlyClient = Depends(get_aptly), _: User = Depends(require_viewer)):
+    """Mirror list enriched with last-sync (native LastDownloadDate) and
+    last-published time. A mirror's last-published time is the newest Release
+    Date among the publications whose snapshots trace back to it — since aptly
+    never publishes a mirror directly, only its snapshots.
+
+    NOTE: declared before /mirrors/{name} so "overview" isn't captured as a name.
+    """
+    mirrors = await aptly.list_mirrors()
+    pubs = await aptly.list_publish()
+    snaps = await aptly.list_snapshots()
+    snap_by_name = {s.get("Name"): s for s in snaps}
+
+    # Read every publication's Release Date concurrently (one HTTP GET each).
+    dates = await asyncio.gather(
+        *(fetch_release_date(p.get("Prefix", ""), p.get("Distribution", "")) for p in pubs)
+    )
+
+    # mirror name -> {publication label: release-date-or-None}
+    by_mirror: dict[str, dict[str, str | None]] = defaultdict(dict)
+    for pub, date in zip(pubs, dates):
+        prefix = _clean_prefix(pub.get("Prefix", ""))
+        dist = pub.get("Distribution", "")
+        label = dist if not prefix else f"{prefix}/{dist}"
+        for src in pub.get("Sources") or []:
+            mirror = mirror_of_snapshot(snap_by_name.get(src.get("Name")))
+            if mirror:
+                by_mirror[mirror][label] = date
+
+    enriched = []
+    for m in mirrors:
+        pubs_for = by_mirror.get(m.get("Name"), {})
+        valid = [d for d in pubs_for.values() if d]
+        item = dict(m)
+        item["LastPublished"] = max(valid) if valid else None
+        item["PublishedIn"] = sorted(pubs_for.keys())
+        enriched.append(item)
+    return enriched
 
 
 @router.get("/mirrors/{name}")

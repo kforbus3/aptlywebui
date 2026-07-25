@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Camera, Plus, Trash2, Package } from "lucide-react";
 import { api, apiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useFormatDateTime } from "../lib/settings";
 import { useToast } from "../components/Toast";
 import {
   Button, Card, Input, Label, Select, Modal, Table, Spinner, EmptyState, PageHeader,
@@ -19,6 +20,7 @@ export default function Snapshots() {
   const toast = useToast();
   const { hasRole } = useAuth();
   const canEdit = hasRole("operator");
+  const fmt = useFormatDateTime();
   const [showCreate, setShowCreate] = useState(false);
   const [viewPackages, setViewPackages] = useState<string | null>(null);
 
@@ -60,7 +62,7 @@ export default function Snapshots() {
               <tr key={s.Name} className="hover:bg-slate-800/40">
                 <td className="px-4 py-3 font-medium text-slate-200">{s.Name}</td>
                 <td className="px-4 py-3 text-slate-400">{s.Description}</td>
-                <td className="px-4 py-3 text-slate-400">{s.CreatedAt ? new Date(s.CreatedAt).toLocaleString() : "—"}</td>
+                <td className="px-4 py-3 text-slate-400">{s.CreatedAt ? fmt(s.CreatedAt) : "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
                     <Button size="sm" variant="secondary" onClick={() => setViewPackages(s.Name)}>

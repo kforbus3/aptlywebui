@@ -44,6 +44,19 @@ class AuditLog(Base):
     detail: Mapped[str] = mapped_column(Text, default="")
 
 
+class AppSetting(Base):
+    """Key/value store for UI-configurable runtime settings (e.g. timezone).
+
+    Kept separate from env-var config (app.config.Settings): these are edited
+    from the UI and persist in the database, overriding the env default.
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+
 class Schedule(Base):
     __tablename__ = "schedules"
 

@@ -14,12 +14,59 @@ import re
 import subprocess
 import tempfile
 import time
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
 from app.config import settings
+
+# aptly sets a mirror-derived snapshot's Description to
+# "Snapshot from mirror [<name>]: ..." — the only reliable link from a published
+# snapshot back to the mirror it came from.
+_SNAP_MIRROR_RE = re.compile(r"from mirror \[([^\]]+)\]")
+
+
+def mirror_of_snapshot(snap: dict | None) -> str | None:
+    """Return the source mirror name recorded in a snapshot's Description, if any."""
+    if not snap:
+        return None
+    m = _SNAP_MIRROR_RE.search(snap.get("Description", ""))
+    return m.group(1) if m else None
+
+
+async def fetch_release_date(prefix: str, distribution: str) -> str | None:
+    """Read a publication's Release ``Date:`` from the public repo server.
+
+    aptly's publish API exposes no publish timestamp, but every re-publish
+    rewrites the Release file's Date — so this is the true last-published time.
+    Returns an ISO-8601 UTC string, or None if the file is unreachable or the
+    date can't be parsed. aptly always writes the date in UTC, so a value with
+    no timezone token is treated as UTC.
+    """
+    base = settings.public_repo_url.rstrip("/")
+    clean = _clean_prefix(prefix)
+    path = f"/dists/{distribution}/Release" if not clean else f"/{clean}/dists/{distribution}/Release"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(base + path)
+            resp.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    for line in resp.text.splitlines():
+        if line.startswith("Date:"):
+            try:
+                dt = parsedate_to_datetime(line[5:].strip())
+            except (TypeError, ValueError):
+                return None
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).isoformat()
+        if not line.strip():
+            break  # end of the top-level header block; Date is always above it
+    return None
 
 # aptly task states (api/task package).
 TASK_SUCCEEDED = 2

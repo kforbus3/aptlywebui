@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Database, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api, apiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useFormatDateTime } from "../lib/settings";
+import { isNeverDate } from "../lib/datetime";
 import { useToast } from "../components/Toast";
 import {
   Button, Card, Input, Label, Select, Modal, Table, Badge, Spinner, EmptyState, PageHeader,
@@ -14,6 +16,11 @@ interface Mirror {
   Distribution: string;
   Components: string[];
   Architectures: string[];
+  // From /mirrors/overview: aptly's native last-sync time, plus the last time a
+  // publication containing this mirror's snapshots was (re)published.
+  LastDownloadDate?: string;
+  LastPublished?: string | null;
+  PublishedIn?: string[];
 }
 
 interface Preset {
@@ -118,11 +125,12 @@ export default function Mirrors() {
   const toast = useToast();
   const { hasRole } = useAuth();
   const canEdit = hasRole("operator");
+  const fmt = useFormatDateTime();
   const [showCreate, setShowCreate] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["mirrors"],
-    queryFn: async () => (await api.get<Mirror[]>("/mirrors")).data,
+    queryFn: async () => (await api.get<Mirror[]>("/mirrors/overview")).data,
   });
 
   // Poll aptly's live task list at the page level so an in-progress sync is
@@ -178,13 +186,30 @@ export default function Mirrors() {
         ) : !data || data.length === 0 ? (
           <EmptyState icon={<Database size={32} />} title="No mirrors yet" hint="Create a mirror to sync packages from an upstream repository." />
         ) : (
-          <Table head={["Name", "Distribution", "Components", "Architectures", "Status", ""]}>
+          <Table head={["Name", "Distribution", "Components", "Architectures", "Last Sync", "Last Published", "Status", ""]}>
             {data.map((m) => (
               <tr key={m.Name} className="hover:bg-slate-800/40">
                 <td className="px-4 py-3 font-medium text-slate-200">{m.Name}</td>
                 <td className="px-4 py-3"><Badge color="blue">{m.Distribution}</Badge></td>
                 <td className="px-4 py-3 text-slate-400">{m.Components?.join(", ")}</td>
                 <td className="px-4 py-3 text-slate-400">{m.Architectures?.join(", ")}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-400">
+                  {isNeverDate(m.LastDownloadDate) ? (
+                    <span className="text-slate-600">Never synced</span>
+                  ) : (
+                    fmt(m.LastDownloadDate)
+                  )}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-400">
+                  {m.PublishedIn && m.PublishedIn.length > 0 ? (
+                    <div className="flex flex-col">
+                      <span>{m.LastPublished ? fmt(m.LastPublished) : "—"}</span>
+                      <span className="text-xs text-slate-600">in {m.PublishedIn.join(", ")}</span>
+                    </div>
+                  ) : (
+                    <span className="text-slate-600">Not published</span>
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   {syncing(m.Name) ? (
                     <Badge color="amber">

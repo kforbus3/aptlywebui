@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Database, FolderGit2, Camera, UploadCloud,
-  Search, KeyRound, CalendarClock, Users, ScrollText, Archive, LogOut, Boxes, RefreshCw,
+  Search, KeyRound, CalendarClock, Users, ScrollText, Archive, LogOut, Boxes, RefreshCw, Settings,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
@@ -21,6 +21,7 @@ const NAV = [
   { to: "/backups", label: "Backups", icon: Archive, role: "admin" },
   { to: "/users", label: "Users", icon: Users, role: "admin" },
   { to: "/audit", label: "Audit Log", icon: ScrollText, role: "admin" },
+  { to: "/settings", label: "Settings", icon: Settings, role: "admin" },
 ] as const;
 
 function AptlyStatus() {
