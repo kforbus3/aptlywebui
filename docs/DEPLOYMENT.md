@@ -299,6 +299,14 @@ Restoring overwrites aptly's data — stop aptly first, restore, then start it.
 - `GET /api/system/aptly` — aptly reachability and version (authenticated).
 - The dashboard shows live resource counts and active aptly tasks.
 
+An unclean host shutdown can corrupt aptly's LevelDB manifest, which makes
+every aptly API call return 500 ("leveldb: manifest corrupted") and shows the
+UI as "aptly offline". The aptly container checks the database on every start
+and runs `aptly db recover` automatically if the check fails, so a reboot after
+a crash heals itself. If the container is already running and wedged, restart
+it (`docker compose restart aptly`) or run the recovery by hand:
+`docker exec aptly aptly db recover`.
+
 ## Upgrades
 
 ```bash

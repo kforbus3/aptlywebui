@@ -24,5 +24,22 @@ do
     fi
 done
 
+# A hard reboot can corrupt aptly's LevelDB manifest, after which every API
+# call fails with "leveldb: manifest corrupted" until `aptly db recover`
+# rebuilds it. Probe the database with a cheap read before serving and recover
+# automatically, so the API never comes up wedged against a corrupt database.
+# On a healthy (or brand-new) database the probe succeeds and nothing runs.
+if ! aptly -config=/etc/aptly.conf snapshot list -raw >/dev/null 2>&1; then
+    echo "aptly database failed its startup check; running 'aptly db recover'..."
+    aptly -config=/etc/aptly.conf db recover || true
+    if aptly -config=/etc/aptly.conf snapshot list -raw >/dev/null 2>&1; then
+        echo "aptly database recovered."
+    else
+        echo "WARNING: aptly database still failing after 'aptly db recover';" \
+             "starting the API anyway. Restore the db directory from a backup" \
+             "if the API keeps returning 500s." >&2
+    fi
+fi
+
 # Hand off to the aptly API server (the image's CMD).
 exec "$@"
