@@ -6,9 +6,7 @@ signed publishing from the browser instead of the command line.
 
 **One deploy gives you everything.** `docker compose up` brings up the aptly
 engine, the web management UI, **and** a repo server that serves your published
-repositories to `apt` clients — no other components to wire up. (Prefer a
-minimal, no-UI, drop-files-and-publish server instead? See the companion
-[`docker-aptly`](https://github.com/kforbus3/docker-aptly) project.)
+repositories to `apt` clients — no other components to wire up.
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688.svg)
